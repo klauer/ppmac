@@ -1,0 +1,68 @@
+#------------------------------------------------------------------------------
+# Copyright (C) Delta Tau Data Systems Inc., 2007
+# All rights reserved.
+# 
+# Generic makefile for any c realtime C plc 0, user servo or user phase
+# For a new project change the following
+# 
+# 1.) SRCS should be assigned the 'C' source code files that need to be compiled
+# 2.) issue the command 'make depend' the first time a project is created and
+#     (every time an additional 'C' file is added to the project the command 
+#     'make depend' must be issued)
+# 3.) issue the command make clean 
+# 4.) issue the command make
+#
+# Notes
+# --------
+# Change DTDEBUG above to -O2 for release w/ optimization
+# Change DTDEBUG above to -g3 for debug 
+#------------------------------------------------------------------------------
+CC = /usr/bin/gcc
+CPP = /usr/bin/g++
+LD = /usr/bin/gcc
+
+CFLAGS = -mhard-float -funsigned-char -funroll-loops \
+-I/opt/ppmac/rtpmac \
+-I/opt/ppmac/libppmac \
+-I/usr/local/xenomai/include \
+-I/usr/local/xenomai/include/posix \
+-D_GNU_SOURCE -D_REENTRANT -D__XENO__
+
+DTDEBUG = %(dt_debug_flags)s
+
+LDFLAGS = -shared -lpthread_rt -lrt \
+ \
+-L../../../bin/%(build_type)s/ \
+-L/usr/local/xenomai/lib \
+-lppmac -L/opt/ppmac/libppmac \
+-Wl,-rpath,/var/ftp/usrflash/Project/C\ Language/Libraries \
+
+RM = rm -f
+PROG = /var/ftp/usrflash/Project/C\ Language/CPLCs/user/%(output_fn)s
+SRCS = %(source_files)s
+
+OBJS = $(SRCS:.c=.o)
+export CROSS_COMPILE=ppc_4xxFP-
+export ARCH=powerpc
+
+# now comes a meta-rule for compiling any C source file.
+$(PROG): $(OBJS)
+	$(LD) -o $(PROG) $(OBJS) $(LDFLAGS) 
+
+%%.o: %%.c
+	$(CPP) $(CFLAGS) $(DTDEBUG) -c $<
+	$(CC) $(CFLAGS) $(DTDEBUG) -c $< 
+
+
+clean:
+	$(RM) $(PROG) $(OBJS)
+
+depend:
+	$(RM) ../../bin/%(build_type)s/dependencyko.lst
+	makedepend -f- -- $(CFLAGS) -- $(SRCS) > ../bin/%(build_type)s/dependencyko.lst
+
+#ifneq ($(MAKECMDGOALS),depend)
+#include ../bin/%(build_type)s/dependencyko.lst
+#endif
+
+

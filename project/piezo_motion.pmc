@@ -1,0 +1,74 @@
+// For this to work, motors should be set up as follows:
+// Coordinate system i:
+//  Stick/slip: X
+// Coordinate system i+1:
+//  Expansion:  X
+//
+
+// TODO: global defines? (global definitions.pmh didn't work)
+#define STOPPED         0
+#define STEP_MODE       1
+#define PLC_DONE        2
+#define EXPANSION_MODE  3
+#define PIEZO_MAGIC     349328453
+
+#define Q_MAGIC         0 // The Q-variable holding the piezo/stick-slip indicator ('magic')
+#define Q_CMD           1 // The command requested from the motion program
+#define Q_REQ_POS       2 // The requested position, according to the motion program
+#define Q_M_EXP         3 // The expansion motor (reporting to the motion program)
+
+open prog 100000
+    #define q_magic   Q0
+    #define q_cmd     Q1
+    #define q_req_pos Q2
+    #define q_m_exp   Q3
+
+    local m_exp; // expansion motor number
+
+    q_req_pos = P1;
+
+    // Request that the PLC open-loop the expansion to 50%
+    q_cmd = STEP_MODE;
+    q_magic = PIEZO_MAGIC;
+
+    while (q_cmd != PLC_DONE) { }
+
+    m_exp = q_m_exp;
+
+    abs;
+    linear;
+    F100;
+    X(P1);
+
+    dwell 0;
+
+    dwell 200;
+    q_cmd = EXPANSION_MODE;
+    while (q_cmd != PLC_DONE) { }
+
+    while (Motor[m_exp].InPos == 0) { }
+    q_cmd = 0;
+
+close
+
+open prog 1
+    local i;
+
+    i=0;
+    abs;
+    linear;
+    F0.01;
+
+    while (i < 10) {
+        X(P1);
+        dwell 0;
+        dwell 100;
+
+        X(0.0);
+        dwell 0;
+        dwell 100;
+
+        i = i + 1;
+    }
+close
+

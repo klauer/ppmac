@@ -1,0 +1,12 @@
+// Sleep for time ms
+open subprog sleep(time)
+    local EndTime;
+    local count;
+
+    EndTime = Sys.Time + time;
+    do { 
+        count++; 
+    }
+
+    while (EndTime > Sys.Time);
+close

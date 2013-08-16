@@ -1,0 +1,5 @@
+open plc 7
+close
+
+//enable plc 7;
+
