@@ -6,8 +6,12 @@ Power PMAC variables.
 from __future__ import print_function
 import os
 import re
-import sqlite3 as sqlite
 import sys
+import subprocess
+
+import sqlite3 as sqlite
+
+MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 def fetchall(c):
     while True:
@@ -67,6 +71,11 @@ class PPCompleterNode(object):
         c.execute('select * from software_tbl1 where CommandID=?', (cid, ))
         rows = c.fetchall()
         self.info = dict((fix_name(item['Command']), item) for item in rows)
+
+        c.execute('select * from software_tbl2 where CommandID=?', (cid, ))
+        rows = c.fetchall()
+        table2_items = dict((fix_name(item['Command']), item) for item in rows)
+        self.info.update(table2_items)
 
         if top:
             c.execute('select * from software_tbl2 where GateChan=? and CommandID=?', (top, self._db_name))
@@ -269,9 +278,6 @@ def start_completer_from_sql_script(script, db_file):
 def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
     sql = open(sql_file, 'rt').read()
     return start_completer_from_sql_script(sql, db_file)
-
-MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
-import subprocess
 
 def start_completer_from_mysql(mysql_host, ppmac_ip, mysql_user='root',
                                script='mysql2sqlite.sh', db_file=':memory:'):

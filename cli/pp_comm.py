@@ -54,6 +54,9 @@ class PPComm(object):
         self._client = client
         self._channel = channel
         self._channel_cmd = cmd
+        if not cmd:
+            # Turn off local echoing of commands
+            self.shell_command('stty -echo')
         return client, channel
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
@@ -84,15 +87,16 @@ class PPComm(object):
 
         raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
-    def wait_for(self, wait_re, timeout=5.0, **kwargs):
+    def wait_for(self, wait_pattern, timeout=5.0, **kwargs):
         channel = self._channel
+        wait_re = re.compile(wait_pattern)
 
         lines = []
         for line in self.read_timeout(timeout, **kwargs):
-            if line == wait_re:
+            if line == wait_pattern:
                 return lines, []
 
-            m = re.match(wait_re, line)
+            m = wait_re.match(line)
             if m is not None:
                 return lines, m.groups()
             lines.append(line)
@@ -104,7 +108,7 @@ class PPComm(object):
 
         self.send_line(command)
         self.send_line('echo "%s"' % done_tag)
-        return self.wait_for('^(%s)$' % re.escape(done_tag), **kwargs)[0]
+        return self.wait_for('.*(%s)$' % re.escape(done_tag), **kwargs)[0]
 
     def read_file(self, filename):
         eof_tag = 'FILE_EOF_FILE_EOF'
@@ -166,6 +170,15 @@ class PPComm(object):
                 vname, value = line.split('=')
                 if var == vname.lower():
                     return type_(value)
+
+    def kill_motor(self, motor):
+        self.open_gpascii()
+        self.send_line('#%dk' % (motor, ))
+
+    def kill_motors(self, motors):
+        self.open_gpascii()
+        motor_list = ','.join('%d' % motor for motor in motors)
+        self.send_line('#%sk' % (motor_list, ))
 
     def close_gpascii(self):
         if self._gpascii:

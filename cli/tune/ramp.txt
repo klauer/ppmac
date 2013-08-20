@@ -1,0 +1,32 @@
+#%(motor1)dk#%(motor2)dk
+&%(coord_sys)da
+open prog%(prog)d close
+
+Motor[%(motor1)d].ServoCtrl=1
+#%(motor1)dj/
+
+close all buffers
+open prog %(prog)d
+    L10=0
+    gather.enable=2
+    linear
+    inc
+    TS0
+    TA1
+    TA%(accel)f
+    TS%(scurve)f
+    F%(velocity)f
+    while(L10 < %(iterations)d)
+    {
+        X%(distance)f
+        dwell%(dwell)f
+        X-%(distance)f
+        L10=L10+1
+    }
+    dwell0
+    gather.enable=0
+close
+undefine all
+&%(coord_sys)d#%(motor1)d->X
+&%(coord_sys)db%(prog)dr
+

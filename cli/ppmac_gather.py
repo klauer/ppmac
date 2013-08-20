@@ -1,22 +1,27 @@
 from __future__ import print_function
 import os
 import time
+import re
 
 import ast
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-servo_period = 0.442673749446657994 * 1e-3 # default
-
+servo_period = 0.442673749446657994 * 1e-3  # default
+max_samples = 0x7FFFFFFF
+#max_samples = 5000
 gather_config_file = '/var/ftp/gather/GatherSetting.txt'
 gather_output_file = '/var/ftp/gather/GatherFile.txt'
+
 
 def get_sample_count(period, duration):
     return int(duration / (servo_period * period))
 
+
 def get_duration(period, samples):
     return int(samples) * (servo_period * period)
+
 
 def get_settings(addresses=[], period=1, duration=2.0, samples=None):
     if samples is not None:
@@ -33,6 +38,53 @@ def get_settings(addresses=[], period=1, duration=2.0, samples=None):
     yield 'gather.enable=1'
     yield 'gather.enable=0'
     yield 'gather.MaxSamples=%d' % samples
+
+
+def read_settings_file(comm, fn=None):
+    def get_index(name):
+        m = re.search('\[(\d+)\]', name)
+        if m:
+            return int(m.groups()[0])
+        return None
+
+    def remove_indices_and_brackets(name):
+        return re.sub('(\[\d+\]?)', '', name)
+
+    if fn is None:
+        fn = gather_config_file
+
+    lines = comm.read_file(fn)
+    settings = {}
+    for line in lines:
+        line = line.strip()
+        lower_line = line.lower()
+        if lower_line.startswith('gather') and '=' in lower_line:
+            var, _, value = line.partition('=')
+            var = var.lower()
+            if '[' in var:
+                base = remove_indices_and_brackets(var)
+                index = get_index(var)
+                if index is None:
+                    settings[var] = value
+                else:
+                    if base not in settings:
+                        settings[base] = {}
+                    settings[base][index] = value
+            else:
+                settings[var] = value
+
+    if 'gather.addr' in settings:
+        addr_dict = settings['gather.addr']
+        # addresses comes in as a dictionary of {index: value}
+        max_addr = max(addr_dict.keys())
+        addr = [''] * (max_addr + 1)
+        for index, value in addr_dict.items():
+            addr[index] = value
+
+        settings['gather.addr'] = addr
+
+    return settings
+
 
 def parse_gather(addresses, lines):
     def fix_line(line):
@@ -56,7 +108,8 @@ def parse_gather(addresses, lines):
 
     return data
 
-def gather(comm, addresses, duration=0.1, period=1):
+
+def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_file):
     comm.close_gpascii()
 
     total_samples = get_sample_count(period, duration)
@@ -66,7 +119,7 @@ def gather(comm, addresses, duration=0.1, period=1):
     if comm.send_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
-    comm.send_line('gpascii -i%s' % gather_config_file)
+    comm.shell_command('gpascii -i%s' % gather_config_file)
 
     comm.open_gpascii()
     comm.send_line('gather.enable=2')
@@ -86,12 +139,14 @@ def gather(comm, addresses, duration=0.1, period=1):
 
     comm.send_line('gather.enable=0')
     comm.close_gpascii()
-    return get_gather_results(comm, addresses, gather_output_file)
+    return get_gather_results(comm, addresses, output_file)
 
-def get_gather_results(comm, addresses, gather_output_file):
-    comm.send_line('gather %s -u' % (gather_output_file, ))
+
+def get_gather_results(comm, addresses, output_file=gather_output_file):
+    comm.shell_command('gather %s -u' % (output_file, ))
     return parse_gather(addresses,
-                        comm.read_file(gather_output_file))
+                        comm.read_file(output_file))
+
 
 def gather_data_to_file(fn, addr, data, delim='\t'):
     with open(fn, 'wt') as f:
@@ -100,9 +155,11 @@ def gather_data_to_file(fn, addr, data, delim='\t'):
             line = ['%s' % s for s in line]
             print(delim.join(line), file=f)
 
+
 def gather_to_file(comm, addr, fn, delim='\t', **kwargs):
     data = gather_to_file(comm, addr, **kwargs)
     return gather_data_to_file(fn, addr, data, delim=delim)
+
 
 def plot(addr, data):
     x_idx = addr.index('Sys.ServoCount.a')
@@ -116,7 +173,10 @@ def plot(addr, data):
             plt.figure(i)
             plt.plot(x_axis, data[:, i] - data[0, i], label=addr[i])
             plt.legend()
+
+    print('Plotting...')
     plt.show()
+
 
 def gather_and_plot(comm, addr, duration=0.2, period=1):
     servo_period = comm.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
@@ -125,6 +185,7 @@ def gather_and_plot(comm, addr, duration=0.2, period=1):
     data = gather(comm, addr, duration=duration, period=period)
     gather_data_to_file('test.txt', addr, data)
     plot(addr, data)
+
 
 def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):
     """
@@ -160,6 +221,7 @@ def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, r
     args = ' '.join([arg % locals() for arg in args])
     return '%s %s' % (tune_paths['othertrajectory'], args)
 
+
 def plot_tune_results(columns, data,
                       keys=['Sys.ServoCount.a',
                             'Desired', 'Actual',
@@ -189,9 +251,8 @@ def plot_tune_results(columns, data,
 
 
 def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt'):
-    comm.close_gpascii()
     print('Running tune', cmd)
-    comm.send_line(cmd)
+    comm.shell_command(cmd)
     lines, groups = comm.wait_for('^(.*)\s+finished Successfully!$', verbose=True, timeout=50)
     print('Tune finished (%s)' % groups[0])
 
@@ -220,6 +281,7 @@ OT_TRAPEZOID = 2
 OT_S_CURVE = 3
 import functools
 
+
 def _other_traj(move_type):
     @functools.wraps(other_trajectory)
     def wrapped(*args, **kwargs):
@@ -230,6 +292,7 @@ ramp = _other_traj(OT_RAMP)
 trapezoid = _other_traj(OT_TRAPEZOID)
 s_curve = _other_traj(OT_S_CURVE)
 
+
 def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, r_mask=0x1e, g_mask=0xffffffff):
     exe = '/opt/ppmac/geterrors/geterrors'
     args = '-t %(time_).1f -#%(motor)d -m0x%(m_mask)x -c0x%(c_mask)x -r0x%(r_mask)x -g0x%(g_mask)x' % locals()
@@ -237,6 +300,7 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
         args += ' -S"%(abort_cmd)s"'
 
     print(exe, args)
+
 
 def main():
     global servo_period

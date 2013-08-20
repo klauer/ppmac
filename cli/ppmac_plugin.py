@@ -11,6 +11,10 @@
 from __future__ import print_function
 import logging
 import os
+import sys
+
+import matplotlib.pyplot as plt
+import numpy as np
 
 # IPython
 import IPython.utils.traitlets as traitlets
@@ -27,6 +31,7 @@ import ppmac_completer as completer
 import ppmac_tune as tune
 
 logger = logging.getLogger('PpmacCore')
+MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 
 # Extension Initialization #
@@ -137,6 +142,7 @@ class PpmacCore(Configurable):
         if c is not None:
             self.completer = c
             self.shell.user_ns['ppmac'] = c
+            print('Completer loaded into namespace. Try ppmac.[tab]')
 
     @magic_arguments()
     @argument('-h', '--host', type=str, help='Power PMAC host IP')
@@ -179,7 +185,7 @@ class PpmacCore(Configurable):
             if self.auto_connect:
                 self.connect()
             else:
-                logging.error('Not connected')
+                logger.error('Not connected')
         return (self.comm is not None)
 
     @magic_arguments()
@@ -268,10 +274,7 @@ class PpmacCore(Configurable):
 
         args = parse_argstring(self.shell_cmd, arg)
 
-        if not args:
-            return
-
-        if not self.check_comm():
+        if not args or not self.check_comm():
             return
 
         self.comm.shell_command(' '.join(args.cmd), verbose=True)
@@ -288,10 +291,7 @@ class PpmacCore(Configurable):
 
         args = parse_argstring(self.motors, arg)
 
-        if not args:
-            return
-
-        if not self.check_comm():
+        if not args or not self.check_comm():
             return
 
         range_ = range(args.first_motor, args.first_motor + args.nmotors)
@@ -328,10 +328,7 @@ class PpmacCore(Configurable):
         """
         args = parse_argstring(self.gather, arg)
 
-        if not args:
-            return
-
-        if not self.check_comm():
+        if not args or not self.check_comm():
             return
 
         def fix_addr(addr):
@@ -349,6 +346,215 @@ class PpmacCore(Configurable):
 
         gather.gather_and_plot(self.comm, addr,
                                duration=args.duration, period=args.period)
+
+    def get_gather_results(self, settings_file=None, verbose=True):
+        if verbose:
+            print('Reading gather settings...')
+        settings = gather.read_settings_file(self.comm, settings_file)
+        if 'gather.addr' not in settings:
+            raise KeyError('gather.addr: Unable to read addresses from settings file')
+
+        if verbose:
+            print('Reading gather data... ', end='')
+            sys.stdout.flush()
+
+        addresses = settings['gather.addr']
+        data = gather.get_gather_results(self.comm, addresses)
+        if verbose:
+            print('done')
+
+        return settings, data
+
+    @magic_arguments()
+    @argument('save_to', type=unicode, nargs='?',
+              help='Filename to save to')
+    @argument('settings_file', type=unicode, nargs='?',
+              help='Gather settings filename')
+    @argument('delimiter', type=unicode, nargs='?', default='\t',
+              help='Character(s) to put between columns (tab is default)')
+    def gather_save(self, magic_args, arg):
+        """
+        Save gather data to a file
+
+        If `filename` is not specified, the data will be output to stdout
+        If `settings_file` is not specified, the default from ppmac_gather.py
+            will be used.
+        """
+        args = parse_argstring(self.gather_save, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        try:
+            settings, data = self.get_gather_results(args.settings_file)
+        except KeyError as ex:
+            logger.error(ex)
+            return
+
+        addresses = settings['gather.addr']
+
+        if args.delimiter is not None:
+            delim = args.delimiter
+        else:
+            delim = '\t'
+
+        if args.save_to is not None:
+            print('Saving to', args.save_to)
+            gather.gather_data_to_file(args.save_to, addresses, data, delim=delim)
+        else:
+            print(' '.join('%20s' % addr for addr in addresses))
+            for line in data:
+                print(' '.join('%20s' % item for item in line))
+
+    def custom_tune(self, script, args):
+        if not self.check_comm():
+            return
+
+        tune_path = os.path.join(MODULE_PATH, 'tune')
+        fn = os.path.join(tune_path, script)
+        if not os.path.exists(fn):
+            print('Script file does not exist: %s' % fn)
+
+        args = ('motor1', 'distance', 'velocity',
+                'dwell', 'accel', 'scurve', 'prog', 'coord_sys',
+                'gather', 'motor2', 'iterations', 'kill_after',
+                )
+        kwargs = dict((name, getattr(args, name)) for name in args
+                      if hasattr(args, name))
+
+        return tune.custom_tune(self.comm, fn, **kwargs)
+
+    @magic_arguments()
+    @argument('filename', type=unicode, nargs='?',
+              help='Gather settings filename')
+    def gather_config(self, magic_args, arg):
+        """
+        Plot the most recent gather data
+        """
+        args = parse_argstring(self.gather_config, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        if args.filename is None:
+            filename = gather.gather_config_file
+        else:
+            filename = args.filename
+
+        settings = self.comm.read_file(filename)
+        for line in settings:
+            print(line)
+
+    @magic_arguments()
+    @argument('-a', '--all', action='store_true',
+              help='Plot all items')
+    @argument('-x', '--x-axis', type=unicode,
+              help='Address (or index) to use as x axis')
+    @argument('-l', '--left', type=unicode, nargs='*',
+              help='Left axis addresses (or indices)')
+    @argument('-r', '--right', type=unicode, nargs='*',
+              help='right axis addresses (or indices)')
+    @argument('settings_file', type=unicode, nargs='?',
+              help='Gather settings filename')
+    @argument('delimiter', type=unicode, nargs='?', default='\t',
+              help='Character(s) to put between columns (tab is default)')
+    @argument('-L', '--left-scale', type=float, default=1.0,
+              help='Scale data on the left axis by this')
+    @argument('-R', '--right-scale', type=float, default=1.0,
+              help='Scale data on the right axis by this')
+    def gather_plot(self, magic_args, arg):
+        """
+        Plot the most recent gather data
+        """
+        args = parse_argstring(self.gather_plot, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        try:
+            settings, data = self.get_gather_results(args.settings_file)
+        except KeyError as ex:
+            logger.error(ex)
+            return
+
+        addresses = settings['gather.addr']
+        print("Available addresses:")
+        for address in addresses:
+            print('\t%s' % address)
+
+        def fix_index(addr):
+            try:
+                return int(addr)
+            except:
+                return addresses.index(addr)
+
+        try:
+            x_index = fix_index(args.x_axis)
+        except:
+            x_index = 0
+
+        if args.all:
+            half = len(addresses) / 2
+            left_indices = range(half)
+            right_indices = range(half, len(addresses))
+            if x_index in left_indices:
+                left_indices.remove(x_index)
+            if x_index in right_indices:
+                right_indices.remove(x_index)
+        else:
+            try:
+                left_indices = [fix_index(addr) for addr in args.left]
+            except TypeError:
+                left_indices = []
+
+            try:
+                right_indices = [fix_index(addr) for addr in args.right]
+            except TypeError:
+                right_indices = []
+
+        data = np.array(data)
+
+        for index in left_indices:
+            data[:, index] *= args.left_scale
+
+        for index in right_indices:
+            data[:, index] *= args.right_scale
+
+        tune.plot_custom(addresses, data, x_index=x_index,
+                         left_indices=left_indices,
+                         right_indices=right_indices)
+        plt.show()
+
+    @magic_arguments()
+    @argument('motor1', default=1, type=int,
+              help='Motor number')
+    @argument('distance', default=1.0, type=float,
+              help='Move distance (motor units)')
+    @argument('velocity', default=1.0, type=float,
+              help='Velocity (motor units/s)')
+    @argument('reps', default=1, type=int, nargs='?',
+              help='Repetitions')
+    @argument('-k', '--no-kill', dest='kill_after', action='store_false',
+              help='Don\'t kill the motor after the move')
+    @argument('-a', '--accel', default=1.0, type=float,
+              help='Set acceleration time (mu/ms^2)')
+    @argument('-d', '--dwell', default=1.0, type=float,
+              help='Dwell time after the move (ms)')
+    @argument('-g', '--gather', type=unicode, nargs='*',
+              help='Gather additional addresses during move')
+    def ramp(self, magic_args, arg):
+        """
+        Ramp move, gather data and plot
+
+        NOTE: This uses a script located in `tune/ramp.txt` to perform the
+              motion.
+        """
+        args = parse_argstring(self.ramp, arg)
+
+        if not args:
+            return
+
+        self.custom_tune('ramp.txt', args)
 
     def other_trajectory(move_type):
         @magic_arguments()
@@ -371,14 +577,14 @@ class PpmacCore(Configurable):
         def move(self, magic_args, arg):
             """
             Move, gather data and plot
+
+            NOTE: This uses the tuning binaries from the Power PMAC.
             """
             args = parse_argstring(move, arg)
 
-            if not args:
+            if not args or not self.check_comm():
                 return
 
-            if not self.check_comm():
-                return
             cmd = tune.other_trajectory(move_type, args.motor, args.distance,
                                         velocity=args.velocity, accel=args.accel,
                                         dwell=args.dwell, reps=args.reps,
@@ -389,6 +595,42 @@ class PpmacCore(Configurable):
             tune.plot_tune_results(addrs, data)
         return move
 
-    ramp = other_trajectory(tune.OT_RAMP)
-    trapezoid = other_trajectory(tune.OT_TRAPEZOID)
-    scurve = other_trajectory(tune.OT_S_CURVE)
+    dt_ramp = other_trajectory(tune.OT_RAMP)
+    dt_trapezoid = other_trajectory(tune.OT_TRAPEZOID)
+    dt_scurve = other_trajectory(tune.OT_S_CURVE)
+
+    @magic_arguments()
+    @argument('motor', default=1, type=int,
+              help='Motor number')
+    def servo(self, magic_args, arg):
+        """
+        """
+        args = parse_argstring(self.servo, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        for var, value in tune.get_settings(self.comm, args.motor,
+                                            completer=self.completer):
+            print('%s = %s' % (var, value))
+
+    @magic_arguments()
+    @argument('motor_from', default=1, type=int,
+              help='Motor number to copy from')
+    @argument('motor_to', default=1, type=int,
+              help='Motor number to copy to')
+    def servo_copy(self, magic_args, arg):
+        """
+        Copy servo settings from one motor to another
+        """
+        args = parse_argstring(self.servo_copy, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        if args.motor_from == args.motor_to:
+            logger.error('Destination motor should be different from source motor')
+            return
+
+        tune.copy_settings(self.comm, args.motor_from, args.motor_to,
+                           completer=self.completer)
