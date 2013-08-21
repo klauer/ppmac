@@ -26,6 +26,7 @@ from IPython.core.magic_arguments import (argument, magic_arguments,
 import ppmac_util as util
 from ppmac_util import PpmacExport
 from pp_comm import (PPComm, TimeoutError)
+from pp_comm import GPError
 import ppmac_gather as gather
 import ppmac_completer as completer
 import ppmac_tune as tune
@@ -229,7 +230,10 @@ class PpmacCore(Configurable):
         if not args:
             return
 
-        print('%s=%s' % (args.variable, self.comm.get_variable(args.variable)))
+        try:
+            print('%s=%s' % (args.variable, self.comm.get_variable(args.variable)))
+        except GPError as ex:
+            print(ex)
 
     @magic_arguments()
     @argument('variable', type=unicode, help='Variable to set')
@@ -243,7 +247,11 @@ class PpmacCore(Configurable):
         if not args:
             return
 
-        print('%s=%s' % (args.variable, self.comm.set_variable(args.variable, args.value)))
+        try:
+            set_result = self.comm.set_variable(args.variable, args.value)
+            print('%s=%s' % (args.variable, set_result))
+        except GPError as ex:
+            print(ex)
 
     @magic_arguments()
     @argument('variable', type=unicode,
@@ -260,10 +268,15 @@ class PpmacCore(Configurable):
             return
 
         var, value = args.variable, args.value
-        if value is None:
-            print('%s=%s' % (args.variable, self.comm.get_variable(args.variable)))
-        else:
-            print('%s=%s' % (args.variable, self.comm.set_variable(args.variable, args.value)))
+        try:
+            if value is None:
+                print('%s=%s' % (args.variable,
+                                 self.comm.get_variable(args.variable)))
+            else:
+                print('%s=%s' % (args.variable,
+                                 self.comm.set_variable(args.variable, args.value)))
+        except GPError as ex:
+            print(ex)
 
     @magic_arguments()
     @argument('cmd', type=unicode, nargs='+', help='Command to send')
@@ -406,7 +419,7 @@ class PpmacCore(Configurable):
             for line in data:
                 print(' '.join('%20s' % item for item in line))
 
-    def custom_tune(self, script, args):
+    def custom_tune(self, script, magic_args, range_var=None, range_values=None):
         if not self.check_comm():
             return
 
@@ -419,10 +432,14 @@ class PpmacCore(Configurable):
                 'dwell', 'accel', 'scurve', 'prog', 'coord_sys',
                 'gather', 'motor2', 'iterations', 'kill_after',
                 )
-        kwargs = dict((name, getattr(args, name)) for name in args
-                      if hasattr(args, name))
+        kwargs = dict((name, getattr(magic_args, name)) for name in args
+                      if hasattr(magic_args, name))
 
-        return tune.custom_tune(self.comm, fn, **kwargs)
+        if range_var is not None:
+            return tune.tune_range(self.comm, fn, range_var, range_values,
+                                   **kwargs)
+        else:
+            return tune.custom_tune(self.comm, fn, **kwargs)
 
     @magic_arguments()
     @argument('filename', type=unicode, nargs='?',
@@ -444,6 +461,56 @@ class PpmacCore(Configurable):
         settings = self.comm.read_file(filename)
         for line in settings:
             print(line)
+
+    @magic_arguments()
+    @argument('motor', default=1, type=int,
+              help='Motor number')
+    @argument('settings_file', type=unicode, nargs='?',
+              help='Gather settings filename')
+    def tune_plot(self, magic_args, arg):
+        """
+        Plot the most recent gather data for `motor`
+        """
+        args = parse_argstring(self.tune_plot, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        try:
+            settings, data = self.get_gather_results(args.settings_file)
+        except KeyError as ex:
+            logger.error(ex)
+            return
+
+        addresses = settings['gather.addr']
+        data = np.array(data)
+
+        desired_addr = 'motor[%d].despos.a' % args.motor
+        actual_addr = 'motor[%d].actpos.a' % args.motor
+
+        cols = tune.get_columns(addresses, data,
+                                'sys.servocount.a', desired_addr, actual_addr)
+
+        x_axis, desired, actual = cols
+
+        fig, ax1 = plt.subplots()
+        ax1.plot(x_axis, desired, color='black', label='Desired')
+        ax1.plot(x_axis, actual, color='b', label='Actual')
+        ax1.set_xlabel('Time (s)')
+        ax1.set_ylabel('Position (motor units)')
+        for tl in ax1.get_yticklabels():
+            tl.set_color('b')
+
+        error = desired - actual
+        ax2 = ax1.twinx()
+        ax2.plot(x_axis, error, color='r', alpha=0.4, label='Following error')
+        ax2.set_ylabel('Error (motor units)')
+        for tl in ax2.get_yticklabels():
+            tl.set_color('r')
+
+        plt.xlim(min(x_axis), max(x_axis))
+        plt.title('Motor %d' % args.motor)
+        plt.show()
 
     @magic_arguments()
     @argument('-a', '--all', action='store_true',
@@ -555,6 +622,65 @@ class PpmacCore(Configurable):
             return
 
         self.custom_tune('ramp.txt', args)
+
+    @magic_arguments()
+    @argument('script', default='ramp.txt', type=unicode,
+              help='Tuning script to use (e.g., ramp.txt)')
+    @argument('motor1', default=1, type=int,
+              help='Motor number')
+    @argument('distance', default=1.0, type=float,
+              help='Move distance (motor units)')
+    @argument('velocity', default=1.0, type=float,
+              help='Velocity (motor units/s)')
+    @argument('reps', default=1, type=int, nargs='?',
+              help='Repetitions')
+    @argument('-k', '--no-kill', dest='kill_after', action='store_false',
+              help='Don\'t kill the motor after the move')
+    @argument('-a', '--accel', default=1.0, type=float,
+              help='Set acceleration time (mu/ms^2)')
+    @argument('-d', '--dwell', default=1.0, type=float,
+              help='Dwell time after the move (ms)')
+    #@argument('-g', '--gather', type=unicode, nargs='*',
+    #          help='Gather additional addresses during move')
+    @argument('-v', '--variable', default='Kp', type=unicode,
+              help='Parameter to vary')
+    @argument('-V', '--values', type=float, nargs='+',
+              help='Values to try')
+    @argument('-l', '--low', type=float, nargs='?',
+              help='Low value')
+    @argument('-h', '--high', type=float, nargs='?',
+              help='High value')
+    @argument('-s', '--step', type=float, nargs='?',
+              help='Step')
+    def tune_range(self, magic_args, arg):
+        """
+        for value in values:
+            Set parameter = value
+            Move, gather data
+            Calculate RMS error
+
+        Plots the RMS error with respect to the parameter values.
+
+        values can be specified in --values or as a range:
+            % tune_range -v Ki --low 0.0 --high 1.0 --step 0.1
+            % tune_range -v Ki --values 0.0 0.1 0.2 ...
+        """
+        args = parse_argstring(self.tune_range, arg)
+
+        if not args:
+            return
+
+        param = args.variable
+        if args.values is not None:
+            values = args.values
+        elif None not in (args.low, args.high, args.step):
+            values = np.arange(args.low, args.high, args.step)
+        else:
+            print('Must set either --values or --low/--high/--step')
+            return
+
+        self.custom_tune(args.script, args,
+                         range_var=param, range_values=values)
 
     def other_trajectory(move_type):
         @magic_arguments()

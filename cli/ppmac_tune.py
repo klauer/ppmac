@@ -39,6 +39,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     if gather:
         gather_vars.extend(list(gather))
 
+    print('Script file is', script_file)
     script = open(script_file, 'rt').read()
     script = script % locals()
 
@@ -54,7 +55,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     comm.open_gpascii()
 
     for line in script.split('\n'):
-        print('->', line)
+        #print('->', line)
         comm.send_line(line)
 
     def get_status():
@@ -285,6 +286,57 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
     plt.xlim(min(x_axis), max(x_axis))
     return ax1, ax2
 
+
+def get_columns(all_columns, data, *to_get):
+    to_get = [col.lower() for col in to_get]
+    all_columns = [col.lower() for col in all_columns]
+    if isinstance(data, list):
+        data = np.array(data)
+
+    indices = [all_columns.index(col) for col in to_get]
+    return [data[:, idx] for idx in indices]
+
+def tune_range(comm, script_file, parameter, values, **kwargs):
+    motor = kwargs['motor1']
+    if '.' not in parameter:
+        parameter = 'Motor[%d].Servo.%s' % (int(motor), parameter)
+
+    def calc_rms(addrs, data):
+        desired_addr = 'motor[%d].despos.a' % motor
+        actual_addr = 'motor[%d].actpos.a' % motor
+
+        desired, actual = get_columns(addrs, data,
+                                      desired_addr, actual_addr)
+
+        err = desired - actual
+        return np.sqrt(np.sum(err ** 2) / len(desired))
+
+    rms_results = []
+    try:
+        start_value = comm.get_variable(parameter)
+        for i, value in enumerate(values):
+            print('%d) Setting %s=%s' % (i + 1, parameter, value))
+            comm.set_variable(parameter, value)
+            print('%s = %s' % (parameter, comm.get_variable(parameter)))
+
+            addrs, data = custom_tune(comm, script_file, **kwargs)
+            data = np.array(data)
+
+            rms_ = calc_rms(addrs, data)
+            print('\tDesired/actual position error (RMS): %g' % rms_)
+            rms_results.append(rms_)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        comm.set_variable(parameter, start_value)
+        print('Resetting parameter %s = %s' % (parameter, comm.get_variable(parameter)))
+        if rms_results:
+            i = np.argmin(rms_results)
+            print('Best %s = %s (error %s)' % (parameter, values[i], rms_results[i]))
+            return values[i], rms_results
+        else:
+            return None, rms_results
+
 def main():
     global servo_period
 
@@ -295,20 +347,31 @@ def main():
     servo_period = comm.servo_period
     print('servo period is', servo_period)
 
-    #ramp_cmd = ramp(3, distance=0.01, velocity=0.01)
-    #columns, data = run_tune_program(comm, ramp_cmd)
-    #plot_tune_results(columns, data)
-    labels, data = custom_tune(comm, 3, 0.01, 0.01, iterations=3,
-                               gather=['Acc24E3[1].Chan[0].ServoCapt.a'])
+    if 0:
+        ramp_cmd = ramp(3, distance=0.01, velocity=0.01)
+        columns, data = run_tune_program(comm, ramp_cmd)
+        plot_tune_results(columns, data)
+    elif 0:
+        labels, data = custom_tune(comm, 'tune/ramp.txt', 3, 0.01, 0.01, iterations=3,
+                                   gather=['Acc24E3[1].Chan[0].ServoCapt.a'])
 
-    data = np.array(data)
-    data[:, 4] /= 4096 * 512
-    #ppmac_gather.plot(gather_vars, data)
-    ax1, ax2 = plot_custom(labels, data, left_indices=[1, 2], right_indices=[4],
-                           left_label='Position [um]', right_label='Raw encoder [um]')
+        data = np.array(data)
+        data[:, 4] /= 4096 * 512
+        #ppmac_gather.plot(gather_vars, data)
+        ax1, ax2 = plot_custom(labels, data, left_indices=[1, 2], right_indices=[4],
+                               left_label='Position [um]', right_label='Raw encoder [um]')
 
-    plt.title('10nm ramp move')
-    plt.show()
+        plt.title('10nm ramp move')
+        plt.show()
+    else:
+        values = np.arange(20, 55, 0.1)
+        best, rms = tune_range(comm, 'tune/ramp.txt', 'Kp', values,
+                               motor1=3, distance=0.01, velocity=0.01, iterations=3)
+
+        plt.plot(values[:len(rms)], rms)
+        plt.xlabel('Kp')
+        plt.ylabel('RMS error')
+        plt.show()
 
 if __name__ == '__main__':
     main()

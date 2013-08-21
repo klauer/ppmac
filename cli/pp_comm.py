@@ -141,7 +141,7 @@ class PPComm(object):
     def open_gpascii(self):
         if not self._gpascii:
             self.send_line(self.CMD_GPASCII)
-            if self.wait_for('^(STDIN Open for ASCII Input)$'):
+            if self.wait_for('.*(STDIN Open for ASCII Input)$'):
                 self._gpascii = True
                 #print('GPASCII mode')
 
