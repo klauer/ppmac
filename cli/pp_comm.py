@@ -45,7 +45,7 @@ class PPComm(object):
 
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(PPMAC_HOST, PPMAC_PORT, username=PPMAC_USER, password=PPMAC_PASS)
+        client.connect(self._host, self._port, username=self._user, password=self._pass)
 
         channel = client.invoke_shell()
         if cmd:
