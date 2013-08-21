@@ -729,6 +729,8 @@ class PpmacCore(Configurable):
     @magic_arguments()
     @argument('motor', default=1, type=int,
               help='Motor number')
+    @argument('text', default='', type=str, nargs='*',
+              help='Text to search for (optional)')
     def servo(self, magic_args, arg):
         """
         """
@@ -737,9 +739,24 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        for var, value in tune.get_settings(self.comm, args.motor,
+        search_text = ' '.join(args.text).lower()
+        for obj, value in tune.get_settings(self.comm, args.motor,
                                             completer=self.completer):
-            print('%s = %s' % (var, value))
+            if isinstance(obj, completer.PPCompleterNode):
+                try:
+                    desc = obj.row['Comments']
+                except KeyError:
+                    desc = ''
+
+                line = '%15s = %-30s [%s]' % (obj.name, value, desc)
+            else:
+                line = '%15s = %s' % (obj, value)
+
+            if not search_text:
+                print(line)
+            else:
+                if search_text in line.lower():
+                    print(line)
 
     @magic_arguments()
     @argument('motor_from', default=1, type=int,
@@ -761,3 +778,34 @@ class PpmacCore(Configurable):
 
         tune.copy_settings(self.comm, args.motor_from, args.motor_to,
                            completer=self.completer)
+
+    @magic_arguments()
+    @argument('variable', type=unicode,
+              help='Variable to search')
+    @argument('text', type=unicode,
+              help='Text to search for')
+    def search(self, magic_args, arg):
+        """
+        Search for `text` in Power PMAC `variable`
+
+        e.g., search motor[1] servo
+                searches for 'servo' related entries
+        """
+
+        if self.completer is None:
+            print('Completer not configured')
+            return
+
+        args = parse_argstring(self.search, arg)
+
+        if not args:
+            Return
+
+        obj = self.completer.check(args.variable)
+        items = obj.search(args.text)
+        def fix_row(row):
+            return ' | '.join([str(item) for item in row
+                              if item not in (u'NULL', None)])
+        for key, info in items.items():
+            row = fix_row(info.values())
+            print('%s: %s' % (key, row))

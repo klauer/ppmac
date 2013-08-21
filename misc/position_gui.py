@@ -98,8 +98,6 @@ def main(host=PPMAC_HOST, port=PPMAC_PORT,
         raise
 
 if __name__ == '__main__':
-    import argparse
-
     parser = argparse.ArgumentParser(description='Motor position display')
     parser.add_argument('first', type=int, default=1,
                         help='First motor to display')

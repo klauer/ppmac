@@ -51,26 +51,24 @@ def check_alias(c, name):
     c.execute('select Alias from software_tbl0 where Command=? collate nocase', (name, ))
     try:
         row = c.fetchone()
-        if row[0] is not None:
-            return row[0]
+        alias = row['Alias']
+        if alias is not None:
+            return alias
     except:
         pass
 
     return name
 
 
-def row_to_dict(row):
-    return dict((key, row[key]) for key in row.keys())
-
-
 class PPCompleterNode(object):
     def __init__(self, conn, parent, row, index=None):
         self.conn = conn
-        self.row = row_to_dict(row)
+        self.row = row
         self.index = index
 
         self._name = row['Command']
         self.parent = parent
+        self._cache = {}
 
         c = conn.cursor()
 
@@ -100,6 +98,32 @@ class PPCompleterNode(object):
         self._lower_case = dict((name.lower(), name) for name in self.info.keys())
         self.set_docstring()
 
+    def search(self, text, search_row=True, case_insensitive=True):
+        """
+        Search keys and optionally all rows for `text`
+        Returns dictionary of {key: rows}
+        """
+        ret = {}
+        if case_insensitive:
+            text = text.lower()
+
+        for key, info in self.info.items():
+            match = False
+            if text in key:
+                match = True
+            elif case_insensitive and text in key.lower():
+                match = True
+            elif search_row:
+                s = str(info)
+                if case_insensitive:
+                    s = s.lower()
+                match = (text in s)
+
+            if match:
+                ret[key] = self.info[key]
+
+        return ret
+
     def set_docstring(self):
         info_keys = ['Comments', 'AddedComments', 'TypeInfo',
                      'RangeInfo', 'Units', 'DefaultInfo',
@@ -126,19 +150,26 @@ class PPCompleterNode(object):
     def __dir__(self):
         return self.info.keys()
 
+    def _get_node(self, row):
+        full_name = row['Command']
+        try:
+            return self._cache[full_name]
+        except KeyError:
+            if full_name.endswith('[]'):
+                node = PPCompleterList(self.conn, self.full_name, row)
+            else:
+                node = PPCompleterNode(self.conn, self.full_name, row)
+
+            self._cache[full_name] = node
+            return node
+
     def __getattr__(self, key):
         try:
             key = key.lower()
             if key in self._lower_case:
                 key = self._lower_case[key]
 
-            row = self.info[key]
-            full_name = row['Command']
-
-            if full_name.endswith('[]'):
-                return PPCompleterList(self.conn, self.full_name, row)
-            else:
-                return PPCompleterNode(self.conn, self.full_name, row)
+            return self._get_node(self.info[key])
         except KeyError:
             raise AttributeError(key)
 
@@ -177,10 +208,11 @@ class PPCompleterNode(object):
 class PPCompleterList(object):
     def __init__(self, conn, parent, row):
         self.conn = conn
-        self.row = row_to_dict(row)
+        self.row = row
         self.name = row['Command']
         self.parent = parent
-        self.item0 = self[0]
+        self.item0 = PPCompleterNode(self.conn, self.parent, self.row, index=0)
+        self.items = { 0 : self.item0 }
 
     @property
     def full_name(self):
@@ -190,7 +222,15 @@ class PPCompleterList(object):
             return self.name
 
     def __getitem__(self, idx):
-        return PPCompleterNode(self.conn, self.parent, self.row, index=idx)
+        try:
+            return self.items[idx]
+        except KeyError:
+            node = PPCompleterNode(self.conn, self.parent, self.row, index=idx)
+            self.items[idx] = node
+            return node
+
+    def search(self, *args, **kwargs):
+        return self.item0.search(*args, **kwargs)
 
     def __getattr__(self, key):
         if hasattr(self.item0, key):
@@ -215,22 +255,30 @@ class PPCompleter(object):
         rows = tbl0.fetchall()
         self.top_level = dict((fix_name(item['Command']), item) for item in rows)
         self._lower_case = dict((name.lower(), name) for name in self.top_level.keys())
+        self._cache = {}
 
     def __dir__(self):
         return self.top_level.keys()
+
+    def _get_node(self, row):
+        full_name = row['Command']
+        try:
+            return self._cache[full_name]
+        except KeyError:
+            if full_name.endswith('[]'):
+                node = PPCompleterList(self.conn, '', row)
+            else:
+                node = PPCompleterNode(self.conn, '', row)
+
+            self._cache[full_name] = node
+            return node
 
     def __getattr__(self, name):
         name = name.lower()
         if name in self._lower_case:
             name = self._lower_case[name]
 
-            row = self.top_level[name]
-            full_name = row['Command']
-
-            if full_name.endswith('[]'):
-                return PPCompleterList(self.conn, '', row)
-            else:
-                return PPCompleterNode(self.conn, '', row)
+            return self._get_node(self.top_level[name])
 
         raise AttributeError(name)
 
@@ -275,18 +323,25 @@ class PPCompleter(object):
             else:
                 addr[i] = name
 
-        return '.'.join(addr)
+        return obj
+
+
+def dict_factory(cursor, row):
+    d = {}
+    for idx, col in enumerate(cursor.description):
+        d[col[0]] = row[idx]
+    return d
 
 
 def start_completer_from_db(dbfile=':memory:'):
     conn = sqlite.connect(dbfile)
-    conn.row_factory = sqlite.Row
+    conn.row_factory = dict_factory
     return PPCompleter(conn)
 
 
 def start_completer_from_sql_script(script, db_file):
     conn = sqlite.connect(db_file)
-    conn.row_factory = sqlite.Row
+    conn.row_factory = dict_factory
 
     c = conn.cursor()
     c.executescript(script)
@@ -360,33 +415,48 @@ def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
     print(c.Sys)
     print(c.Gate3)
     print(c.Gate3[0])
-    print(c.Acc24E3[0])
-    print(c.Acc24E3[0].Chan[0])
     print(c.Gate3[0].Chan[0])
     print(c.Gate3[0].Chan[0].ABC)
+    print(c.Acc24E3[0])
+    print(c.Acc24E3[0].Chan[0])
     print()
     print('docstring:')
     print(c.Gate3[0].Chan[0].ABC.__doc__)
-    print(c.check('Gate3[0].Chan[0].ABC'))
-    print(c.check('Sys'))
-    print(c.check('Gate3[0]'))
-    print(c.check('acc24e3[0].chan[0]'))
+    print('check', c.check('Gate3[0].Chan[0].ABC'))
+    print('check', c.check('Sys'))
+    print('check', c.check('Gate3[0]'))
+    print('check', c.check('acc24e3[0].chan[0]'))
     print(c.Motor[3])
-    print(c.check('motor[3].pos'))
+    print('check', c.check('motor[3].pos'))
+
     try:
         print(c.check('Acc24E3[0].Chan[0].blah'))
     except AttributeError as ex:
         print('ok -', ex)
+    else:
+        print('fail')
 
     try:
         print(c.check('Acc24E3.Chan.ABC'))
     except AttributeError as ex:
         print('ok -', ex)
+    else:
+        print('fail')
 
     try:
         print(c.check('Acc24E3[0].Chan[0].ABC[0]'))
     except AttributeError as ex:
         print('ok -', ex)
+    else:
+        print('fail')
+
+    c0 = c.acc24e3[0].chan
+    for key, value in c0.search('4095').items():
+        print(key, value)
+
+    c0 = c.acc24e3[0].chan[0]
+    for key, value in c0.search('4095').items():
+        print(key, value.values())
 
 if __name__ == '__main__':
     main()

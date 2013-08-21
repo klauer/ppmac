@@ -219,7 +219,13 @@ def get_settings(comm, motor, completer=None, settings=None):
     base = 'Motor[%d].' % motor
     ret = {}
     for setting in sorted(settings):
-        yield setting, comm.get_variable('%s%s' % (base, setting))
+        full_name = '%s%s' % (base, setting)
+        value = comm.get_variable(full_name)
+        if completer is not None:
+            obj = completer.check(full_name)
+            yield obj, value
+        else:
+            yield full_name, value
 
 def copy_settings(comm, motor_from, motor_to, settings=None, completer=None):
     if settings is None:
