@@ -1,6 +1,12 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
 """
-This is a bit of a mess, but it allows for Python introspection into
-Power PMAC variables.
+:mod:`ppmac_completer` -- Ppmac Completer
+=========================================
+
+.. module:: ppmac_completer
+   :synopsis: Allows for Python introspection into Power PMAC variables.
+.. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
 
 from __future__ import print_function
@@ -13,6 +19,7 @@ import sqlite3 as sqlite
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
+
 def fetchall(c):
     while True:
         row = c.fetchone()
@@ -20,20 +27,25 @@ def fetchall(c):
             break
         yield row
 
+
 def get_index(name):
     m = re.search('\[(\d+)\]', name)
     if m:
         return int(m.groups()[0])
     return None
 
+
 def remove_indices_and_brackets(name):
     return re.sub('(\[\d+\]?)', '', name)
+
 
 def remove_indices(name):
     return re.sub('(\[\d+\])', '[]', name)
 
+
 def fix_name(name):
     return name.replace('[]', '')
+
 
 def check_alias(c, name):
     c.execute('select Alias from software_tbl0 where Command=? collate nocase', (name, ))
@@ -46,8 +58,10 @@ def check_alias(c, name):
 
     return name
 
+
 def row_to_dict(row):
     return dict((key, row[key]) for key in row.keys())
+
 
 class PPCompleterNode(object):
     def __init__(self, conn, parent, row, index=None):
@@ -159,6 +173,7 @@ class PPCompleterNode(object):
 
     __repr__ = __str__
 
+
 class PPCompleterList(object):
     def __init__(self, conn, parent, row):
         self.conn = conn
@@ -189,6 +204,7 @@ class PPCompleterList(object):
         return self.full_name
 
     __repr__ = __str__
+
 
 class PPCompleter(object):
     def __init__(self, conn):
@@ -261,10 +277,12 @@ class PPCompleter(object):
 
         return '.'.join(addr)
 
-def start_completer_from_db(dbfile):
-    conn = sqlite.connect(dbfile) #u':memory:')
+
+def start_completer_from_db(dbfile=':memory:'):
+    conn = sqlite.connect(dbfile)
     conn.row_factory = sqlite.Row
     return PPCompleter(conn)
+
 
 def start_completer_from_sql_script(script, db_file):
     conn = sqlite.connect(db_file)
@@ -275,9 +293,11 @@ def start_completer_from_sql_script(script, db_file):
     conn.commit()
     return PPCompleter(conn)
 
+
 def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
     sql = open(sql_file, 'rt').read()
     return start_completer_from_sql_script(sql, db_file)
+
 
 def start_completer_from_mysql(mysql_host, ppmac_ip, mysql_user='root',
                                script='mysql2sqlite.sh', db_file=':memory:'):
@@ -316,6 +336,7 @@ def start_completer_from_mysql(mysql_host, ppmac_ip, mysql_user='root',
         return None
 
     return start_completer_from_sql_script(sqlite_sql, db_file)
+
 
 def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
     db_file = os.path.join(MODULE_PATH, 'ppmac.db')
@@ -369,7 +390,3 @@ def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
 
 if __name__ == '__main__':
     main()
-
-# 'select Command,Comments,Alias,Category,Editor from software_tbl0'
-# 'select CommandID,Command,Comments,AddedComments,Category,Editor,TypeInfo,RangeInfo,Units,DefaultInfo from software_tbl1'
-# 'select CommandID,Command,Comments,AddedComments,Category,Editor,TypeInfo,RangeInfo,Units,DefaultInfo from software_tbl2'

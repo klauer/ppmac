@@ -1,9 +1,10 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-:mod:`pp_plugin` -- Ppmac Core module
-=====================================
+:mod:`ppmac_plugin` -- Ppmac Core module
+========================================
 
-.. module:: pp_plugin
+.. module:: ppmac_plugin
    :synopsis: IPython-based plugin for configuring/controlling the Power PMAC via command-line
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """

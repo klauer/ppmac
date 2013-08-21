@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+:mod:`ppmac_gather` -- Ppmac Gather Utilities
+=============================================
+
+.. module:: ppmac_gather
+   :synopsis: Power PMAC gather utility functions
+.. moduleauthor:: Ken Lauer <klauer@bnl.gov>
+"""
+
 from __future__ import print_function
 import os
 import time

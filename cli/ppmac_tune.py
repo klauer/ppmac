@@ -1,3 +1,14 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+"""
+:mod:`ppmac_tune` -- Ppmac Tuning
+=================================
+
+.. module:: ppmac_tune
+   :synopsis: Power PMAC tune utility functions
+.. moduleauthor:: Ken Lauer <klauer@bnl.gov>
+"""
+
 from __future__ import print_function
 import os
 import functools
