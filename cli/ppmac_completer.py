@@ -8,6 +8,7 @@
    :synopsis: Allows for Python introspection into Power PMAC variables.
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
+# this whole module should be redone if I ever get a chance...
 
 from __future__ import print_function
 import os
@@ -18,7 +19,6 @@ import subprocess
 import sqlite3 as sqlite
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
-
 
 def fetchall(c):
     while True:
@@ -81,22 +81,19 @@ class PPCompleterNode(object):
 
         cid = remove_indices(cid)
         c.execute('select * from software_tbl1 where CommandID=?', (cid, ))
-        rows = c.fetchall()
-        self.info = dict((fix_name(item['Command']), item) for item in rows)
+        self.info = dict((fix_name(item['Command']), item) for item in c.fetchall())
 
         c.execute('select * from software_tbl2 where CommandID=?', (cid, ))
-        rows = c.fetchall()
-        table2_items = dict((fix_name(item['Command']), item) for item in rows)
+        table2_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
         self.info.update(table2_items)
 
         if top:
             c.execute('select * from software_tbl2 where GateChan=? and CommandID=?', (top, self._db_name))
-            rows = c.fetchall()
-            gate_items = dict((fix_name(item['Command']), item) for item in rows)
+            gate_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
             self.info.update(gate_items)
 
         self._lower_case = dict((name.lower(), name) for name in self.info.keys())
-        self.set_docstring()
+        self._set_docstring()
 
     def search(self, text, search_row=True, case_insensitive=True):
         """
@@ -124,7 +121,7 @@ class PPCompleterNode(object):
 
         return ret
 
-    def set_docstring(self):
+    def _set_docstring(self):
         info_keys = ['Comments', 'AddedComments', 'TypeInfo',
                      'RangeInfo', 'Units', 'DefaultInfo',
                      'UserLevel', 'Category']

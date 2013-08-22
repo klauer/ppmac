@@ -27,12 +27,16 @@ PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
 
 
 class PositionMonitor(QtGui.QFrame):
-    def __init__(self, comm, motors, update_rate=0.1, parent=None):
+    def __init__(self, comm, motors, update_rate=0.1,
+                 scale=1.0, format_='%g',
+                 parent=None):
         QtGui.QFrame.__init__(self, parent)
 
         self.comm = comm
         self.motors = motors
         self.update_rate = update_rate * 1000.
+        self.scale = scale
+        self.format_ = format_
         self.widgets = widgets = []
 
         layout = QtGui.QFormLayout()
@@ -54,12 +58,13 @@ class PositionMonitor(QtGui.QFrame):
 
         act_pos = [comm.get_variable('Motor[%d].ActPos' % i, type_=float)
                    for i in motors]
-        home_pos = [comm.get_variable('Motor[%d].ActPos' % i, type_=float)
+        home_pos = [comm.get_variable('Motor[%d].HomePos' % i, type_=float)
                     for i in motors]
-        rel_pos = [act - home for act, home in zip(act_pos, home_pos)]
+        rel_pos = [self.scale * (act - home)
+                   for act, home in zip(act_pos, home_pos)]
 
         for i, pos in enumerate(rel_pos):
-            self.widgets[i].setText('%.3g' % pos)
+            self.widgets[i].setText(self.format_ % pos)
 
         self.act_pos = act_pos
         self.home_pos = home_pos
@@ -71,13 +76,16 @@ class PositionMonitor(QtGui.QFrame):
 
 def main(host=PPMAC_HOST, port=PPMAC_PORT,
          user=PPMAC_USER, password=PPMAC_PASS,
-         motors=range(1, 10), rate=0.1):
+         motors=range(1, 10), rate=0.1,
+         scale=1.0, format_='%g'):
     global gui
 
     app = QtGui.QApplication(sys.argv)
 
     print('Connecting to host %s:%d' % (host, port))
     print('User %s password %s' % (user, password))
+    print('Motors: %s' % motors)
+    print('Scale: %s Format: %s' % (scale, format_))
     try:
         comm = pp_comm.PPComm(host=host, port=port, user=user, password=password)
     except Exception as ex:
@@ -89,7 +97,8 @@ def main(host=PPMAC_HOST, port=PPMAC_PORT,
     app.quitOnLastWindowClosed = True
     QtGui.QApplication.instance = app
 
-    monitor = PositionMonitor(comm, motors, update_rate=rate)
+    monitor = PositionMonitor(comm, motors, update_rate=rate,
+                              scale=scale, format_=format_)
     monitor.show()
     try:
         sys.exit(app.exec_())
@@ -113,10 +122,15 @@ if __name__ == '__main__':
                         help='Username (root) (environment variable PPMAC_USER)')
     parser.add_argument('-p', '--password', type=str, default=PPMAC_PASS,
                         help='Password (deltatau) (environment variable PPMAC_PASS)')
+    parser.add_argument('-s', '--scale', type=float, default=1.0,
+                        help='Scale factor for the encoder positions')
+    parser.add_argument('-f', '--format', type=str, default='%.3f',
+                        help='String format for the encoder positions')
 
     args = parser.parse_args()
     if args is not None:
         motors = range(args.first, args.last + 1)
         main(host=args.host, port=args.port,
              user=args.user, password=args.password,
-             motors=motors, rate=args.rate)
+             motors=motors, rate=args.rate,
+             scale=args.scale, format_=args.format)
