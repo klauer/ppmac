@@ -19,6 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 from ppmac_gather import get_gather_results
 import ppmac_gather
+import pp_comm
+
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,6 +34,8 @@ logger = logging.getLogger('ppmac_tune')
 def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
                 dwell=0.0, accel=1.0, scurve=0.0, prog=999, coord_sys=0,
                 gather=[], motor2=None, iterations=2, kill_after=True):
+
+    coords = comm.get_coords()
     gather_config_file = ppmac_gather.gather_config_file
     if motor2 is None:
         motor2 = motor1
@@ -93,6 +97,16 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
         if kill_after:
             print('Killing motors')
             comm.kill_motors([motor1, motor2])
+    finally:
+        print('Restoring coordinate systems...')
+        comm.set_coords(coords, verbose=True)
+
+    try:
+        for line in comm.read_timeout(timeout=0.1):
+            if 'error' in line:
+                print(line)
+    except pp_comm.TimeoutError:
+        pass
 
     result_path = ppmac_gather.gather_output_file
     data = ppmac_gather.get_gather_results(comm, gather_vars, result_path)
@@ -274,8 +288,8 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
     print(exe, args)
 
 def plot_custom(columns, data, left_indices=[], right_indices=[],
-                xlabel='Time (s)', left_label='Position',
-                right_label='Error', x_index=0,
+                xlabel='Time (s)', left_label='',
+                right_label='', x_index=0,
                 left_colors='bgc', right_colors='rmk'):
     data = np.array(data)
 
@@ -357,9 +371,7 @@ def tune_range(comm, script_file, parameter, values, **kwargs):
 def main():
     global servo_period
 
-    from pp_comm import PPComm
-
-    comm = PPComm()
+    comm = pp_comm.PPComm()
     comm.open_channel()
     servo_period = comm.servo_period
     print('servo period is', servo_period)

@@ -163,7 +163,7 @@ def output_config(base_path, project_files, release=True):
 
     local_cfg, remote_cfg = get_paths(base_path, 'pp_proj.ini', include_fn=True)
 
-    pmac_programs.append('last_file_number=%d' % (i + 1))
+    pmac_programs.append('last_file_number=%d' % i)
     pmac_programs = '\n'.join(pmac_programs)
     linux_programs = '\n'.join(linux_programs)
     rtusrcode = '\n'.join(rtusrcode)

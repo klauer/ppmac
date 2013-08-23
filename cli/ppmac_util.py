@@ -11,23 +11,27 @@
 
 import logging
 import functools
+import math
+
 from IPython.core.magic_arguments import argument as MagicArgument
 
 class PpmacExported(object):
     """IPython Ppmac plugin exported function"""
     pass
 
+
 def PpmacExport(fcn):
     """
     Simple decorator to indicate the function should be exported to the user
     namespace
     """
-    @wraps(fcn)
+    @functools.wraps(fcn)
     def wrapped(*args, **kwargs):
         return fcn(*args, **kwargs)
 
     wrapped.decorators = [PpmacExported()]
     return wrapped
+
 
 def export_magic_by_decorator(ipython, obj,
                               magic_arguments=True, modify_name=None,
@@ -95,6 +99,7 @@ def export_magic_by_decorator(ipython, obj,
                 ipython.define_magic(name, fcn)
                 logging.debug('Magic defined: %s=%s' % (name, fcn))
 
+
 def export_class_magic(ipython, instance):
     """
     Functions of a class instance that are decorated with specific
@@ -110,3 +115,24 @@ def export_class_magic(ipython, instance):
         return wrapped
 
     return export_magic_by_decorator(ipython, instance, wrap_fcn=wrap)
+
+
+def tracking_filter(cutoff_freq, damping_ratio=0.7, servo_period=0.442673749446657994):
+    #Tf = 1 / (2. * pi * cutoff_freq)
+    wn = 2 * math.pi * cutoff_freq
+    Ts = servo_period
+    Kp = index2 = 256. - 512. * damping_ratio * wn * Ts
+    Ki = index1 = 256. * (wn ** 2) * (Ts ** 2)
+
+    index1 = int(index1)
+    index2 = int(index2)
+
+    if index2 < 0:
+        index2 = 0
+    if index1 > 255:
+        index1 = 255
+
+    Tf = (256 / (256 - index2)) - 1
+    print('Time constant: %d servo cycles' % Tf)
+    return index1, index2
+

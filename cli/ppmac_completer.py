@@ -83,14 +83,15 @@ class PPCompleterNode(object):
         c.execute('select * from software_tbl1 where CommandID=?', (cid, ))
         self.info = dict((fix_name(item['Command']), item) for item in c.fetchall())
 
-        c.execute('select * from software_tbl2 where CommandID=?', (cid, ))
-        table2_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
-        self.info.update(table2_items)
+        #print('gatechan', top, 'cid', self._db_name)
+        c.execute('select * from software_tbl2 where GateChan=? and CommandID=?', (top, self._db_name))
+        gate_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
+        self.info.update(gate_items)
 
-        if top:
-            c.execute('select * from software_tbl2 where GateChan=? and CommandID=?', (top, self._db_name))
-            gate_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
-            self.info.update(gate_items)
+        if not gate_items:
+            c.execute('select * from software_tbl2 where CommandID=?', (cid, ))
+            table2_items = dict((fix_name(item['Command']), item) for item in c.fetchall())
+            self.info.update(table2_items)
 
         self._lower_case = dict((name.lower(), name) for name in self.info.keys())
         self._set_docstring()
@@ -297,7 +298,7 @@ class PPCompleter(object):
 
             try:
                 obj = getattr(obj, entry)
-            except AttributeError:
+            except AttributeError as ex:
                 if i > 0:
                     raise AttributeError('%s does not exist in %s' %
                                          (entry, '.'.join(addr[:i]))
@@ -306,19 +307,15 @@ class PPCompleter(object):
                     raise AttributeError('%s does not exist' % (entry))
 
             if index is not None and not isinstance(obj, PPCompleterList):
-                print(i)
                 raise AttributeError('%s is not a list' % (entry))
             elif index is None and isinstance(obj, PPCompleterList):
                 raise AttributeError('%s is a list' % (entry))
 
-            name = obj.name
             if index is not None:
-                if name.endswith('[]'):
-                    name = name[:-2]
+                obj = obj[index]
 
-                addr[i] = '%s[%d]' % (name, index)
-            else:
-                addr[i] = name
+            name = obj.name
+            addr[i] = name
 
         return obj
 
@@ -454,6 +451,17 @@ def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
     c0 = c.acc24e3[0].chan[0]
     for key, value in c0.search('4095').items():
         print(key, value.values())
+
+    print(dir(c.acc24e2s[4].chan[0]))
+    try:
+        c.acc24e2s[4].chan[0].pfmwidth
+    except AttributeError as ex:
+        print('ok -', ex)
+    else:
+        print('fail')
+
+    print(c.check('acc24e2s[4].chan[0]'))
+
 
 if __name__ == '__main__':
     main()

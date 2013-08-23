@@ -167,7 +167,7 @@ class PPComm(object):
                 raise GPError(line)
             #print('<-', line)
             if '=' in line:
-                vname, value = line.split('=')
+                vname, value = line.split('=', 1)
                 if var == vname.lower():
                     return type_(value)
 
@@ -177,7 +177,10 @@ class PPComm(object):
 
     def kill_motors(self, motors):
         self.open_gpascii()
-        motor_list = ','.join('%d' % motor for motor in motors)
+        motor_list = list(set(motors))
+        motor_list.sort()
+        motor_list = ','.join('%d' % motor for motor in motor_list)
+
         self.send_line('#%sk' % (motor_list, ))
 
     def close_gpascii(self):
@@ -195,9 +198,80 @@ class PPComm(object):
         # TODO
         self.comm = None
 
+    def get_coord(self, motor):
+        if not self._gpascii:
+            self.open_gpascii()
+
+        self.send_line('&0#%d->' % motor)
+
+        for line in self.read_timeout():
+            if 'error' in line:
+                raise GPError(line)
+
+            #print('<-', line)
+            if '#' in line:
+                # <- &2#1->x
+                # ('&2', '2', '1', 'x')
+                # <- #3->0
+                # (None, None, '3', '0')
+
+                m = re.search('(&(\d+))?#(\d+)->([a-zA-Z0-9]+)', line)
+                if m:
+                    groups = m.groups()
+                    _, coord, mnum, assigned = groups
+                    if assigned == '0':
+                        assigned = None
+                    if int(mnum) == motor:
+                        if coord is None:
+                            coord = 0
+                        else:
+                            coord = int(coord)
+                        return coord, assigned
+
+        return None, None
+
+    def get_coords(self):
+        num_motors = self.get_variable('sys.maxmotors', type_=int)
+        coords = {}
+        for motor in range(num_motors):
+            coord, assigned = self.get_coord(motor)
+            if assigned is not None:
+                if coord not in coords:
+                    coords[coord] = {}
+                coords[coord][motor] = assigned
+
+        return coords
+
+    def set_coords(self, coords, verbose=False):
+        self.open_gpascii()
+        self.send_line('undefine all')
+        if not coords:
+            return
+
+        max_coord = max(coords.keys())
+        if max_coord > self.get_variable('sys.maxcoords', type_=int):
+            if verbose:
+                print('Increasing maxcoords to %d' % (max_coord + 1))
+            self.set_variable('sys.maxcoords', max_coord + 1)
+
+        for coord, motors in coords.items():
+            for motor, assigned in motors.items():
+                send_ = '&%d#%d->%s' % (coord, motor, assigned)
+                if verbose:
+                    print('Coordinate system %d: motor %d is %s' %
+                          (coord, motor, assigned))
+
+                self.send_line(send_)
+
+        print('Done')
+
 def main():
     comm = PPComm()
     comm.open_channel()
+
+    coords = comm.get_coords()
+    print('coords are', coords)
+    comm.set_coords(coords)
 
 if __name__ == '__main__':
     main()

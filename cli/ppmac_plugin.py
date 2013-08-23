@@ -191,7 +191,7 @@ class PpmacCore(Configurable):
         return (self.comm is not None)
 
     @magic_arguments()
-    @argument('cmd', type=unicode,
+    @argument('cmd', nargs='+', type=unicode,
               help='Command to send')
     @argument('-t', '--timeout', type=int, default=0.5,
               help='Time to wait for a response (s)')
@@ -209,7 +209,8 @@ class PpmacCore(Configurable):
             return
 
         self.comm.open_gpascii()
-        self.comm.send_line(args.cmd)
+        line = ' '.join(args.cmd)
+        self.comm.send_line(line)
         try:
             for line in self.comm.read_timeout(timeout=args.timeout):
                 if line:
@@ -347,7 +348,7 @@ class PpmacCore(Configurable):
 
         def fix_addr(addr):
             if self.completer:
-                addr = self.completer.check(addr)
+                addr = str(self.completer.check(addr))
 
             if not addr.endswith('.a'):
                 addr = '%s.a' % addr
@@ -496,7 +497,7 @@ class PpmacCore(Configurable):
 
         fig, ax1 = plt.subplots()
         ax1.plot(x_axis, desired, color='black', label='Desired')
-        ax1.plot(x_axis, actual, color='b', label='Actual')
+        ax1.plot(x_axis, actual, color='b', alpha=0.5, label='Actual')
         ax1.set_xlabel('Time (s)')
         ax1.set_ylabel('Position (motor units)')
         for tl in ax1.get_yticklabels():
@@ -590,7 +591,9 @@ class PpmacCore(Configurable):
 
         tune.plot_custom(addresses, data, x_index=x_index,
                          left_indices=left_indices,
-                         right_indices=right_indices)
+                         right_indices=right_indices,
+                         left_label=str(args.left),
+                         right_label=str(args.right))
         plt.show()
 
     @magic_arguments()
@@ -809,3 +812,64 @@ class PpmacCore(Configurable):
         for key, info in items.items():
             row = fix_row(info.values())
             print('%s: %s' % (key, row))
+
+
+    @magic_arguments()
+    @argument('num', default=1, type=int,
+              help='Encoder table number')
+    @argument('cutoff', default=100.0, type=float,
+              help='Cutoff frequency (Hz)')
+    @argument('damping', default=0.7, nargs='?', type=float,
+              help='Damping ratio (0.7)')
+    def enc_filter(self, magic_args, arg):
+        """
+        Setup tracking filter on EncTable[]
+
+        Select cutoff frequency fc (Hz) = 1 / (2 pi Tf)
+        Typically 100 ~ 200 Hz for resolver, 500 Hz ~ 1 kHz for sine encoder
+        Select damping ratio r (typically = 0.7)
+        Compute natural frequency wn = 2 pi fc
+        Compute sample time Ts = Sys.ServoPeriod / 1000
+        Compute Kp term .index2 = 256 - 512 * wn * .n * Ts
+        Compute Ki term .index1 = 256 * .n2 * Ts2
+        """
+
+        args = parse_argstring(self.enc_filter, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        servo_period = self.servo_period
+        if args.cutoff <= 0.0:
+            i1, i2 = 0, 0
+        else:
+            i1, i2 = util.tracking_filter(args.cutoff, args.damping,
+                                          servo_period=servo_period)
+
+        v1 = 'EncTable[%d].index1' % args.num
+        v2 = 'EncTable[%d].index2' % args.num
+        for var, value in zip((v1, v2), (i1, i2)):
+            self.set_verbose(var, value)
+
+    def set_verbose(self, var, value):
+        self.comm.set_variable(var, value)
+        print('%s = %s' % (var, self.comm.get_variable(var)))
+
+    @magic_arguments()
+    @argument('-d', '--disable', default=False, action='store_true',
+              help='Plot all items')
+    def wpkey(self, magic_self, arg):
+        args = parse_argstring(self.wpkey, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        enabled_str = '$AAAAAAAA'
+        if args.disable:
+            print('Disabling')
+            self.set_verbose('Sys.WpKey', '0')
+        else:
+            print('Enabling')
+            self.set_verbose('Sys.WpKey', enabled_str)
+
+

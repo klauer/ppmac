@@ -1,4 +1,4 @@
-#%(motor1)dk#%(motor2)dk
+#%(motor1)dk
 &%(coord_sys)da
 open prog%(prog)d close
 
@@ -8,6 +8,8 @@ Motor[%(motor1)d].ServoCtrl=1
 close all buffers
 open prog %(prog)d
     L10=0
+
+    dwell 1.0
     gather.enable=2
     linear
     inc
