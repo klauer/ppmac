@@ -1,0 +1,15 @@
+python position_gui.py 1 6 -f %.4f -r 0.05 -t &
+PID1=$!
+
+python position_gui.py 11 12 -f %.4f -r 0.05 -t &
+PID2=$!
+
+trap ctrl_c INT
+
+function ctrl_c() {
+    kill $PID1
+    kill $PID2
+}
+
+wait
+

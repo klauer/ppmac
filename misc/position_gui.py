@@ -17,7 +17,8 @@ import argparse
 from PyQt4 import (QtGui, QtCore)
 from PyQt4.QtCore import Qt
 
-sys.path.insert(0, '../cli')
+MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(MODULE_PATH, '../cli'))
 import pp_comm
 
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
@@ -27,14 +28,17 @@ PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
 
 
 class PositionMonitor(QtGui.QFrame):
-    def __init__(self, comm, motors, update_rate=0.1,
+    def __init__(self, comm, motors=[1, 2, 3], rate=0.1,
                  scale=1.0, format_='%g',
-                 parent=None):
+                 parent=None, on_top=False):
         QtGui.QFrame.__init__(self, parent)
+
+        if on_top:
+            self.setWindowFlags(QtCore.Qt.WindowStaysOnTopHint)
 
         self.comm = comm
         self.motors = motors
-        self.update_rate = update_rate * 1000.
+        self.update_rate = rate * 1000.
         self.scale = scale
         self.format_ = format_
         self.widgets = widgets = []
@@ -71,13 +75,13 @@ class PositionMonitor(QtGui.QFrame):
         self.rel_pos = rel_pos
 
         elapsed = (time.time() - t0) * 1000.0
-        QtCore.QTimer.singleShot(max(self.update_rate - elapsed, 0), self.update)
+        next_update = max(self.update_rate - elapsed, 0)
+        QtCore.QTimer.singleShot(next_update, self.update)
 
 
 def main(host=PPMAC_HOST, port=PPMAC_PORT,
          user=PPMAC_USER, password=PPMAC_PASS,
-         motors=range(1, 10), rate=0.1,
-         scale=1.0, format_='%g'):
+         **kwargs):
     global gui
 
     app = QtGui.QApplication(sys.argv)
@@ -85,7 +89,7 @@ def main(host=PPMAC_HOST, port=PPMAC_PORT,
     print('Connecting to host %s:%d' % (host, port))
     print('User %s password %s' % (user, password))
     print('Motors: %s' % motors)
-    print('Scale: %s Format: %s' % (scale, format_))
+    #print('Scale: %s Format: %s' % (scale, format_))
     try:
         comm = pp_comm.PPComm(host=host, port=port, user=user, password=password)
     except Exception as ex:
@@ -97,8 +101,7 @@ def main(host=PPMAC_HOST, port=PPMAC_PORT,
     app.quitOnLastWindowClosed = True
     QtGui.QApplication.instance = app
 
-    monitor = PositionMonitor(comm, motors, update_rate=rate,
-                              scale=scale, format_=format_)
+    monitor = PositionMonitor(comm, **kwargs)
     monitor.show()
     try:
         sys.exit(app.exec_())
@@ -126,6 +129,8 @@ if __name__ == '__main__':
                         help='Scale factor for the encoder positions')
     parser.add_argument('-f', '--format', type=str, default='%.3f',
                         help='String format for the encoder positions')
+    parser.add_argument('-t', '--on-top', action='store_true',
+                        help='String format for the encoder positions')
 
     args = parser.parse_args()
     if args is not None:
@@ -133,4 +138,5 @@ if __name__ == '__main__':
         main(host=args.host, port=args.port,
              user=args.user, password=args.password,
              motors=motors, rate=args.rate,
-             scale=args.scale, format_=args.format)
+             scale=args.scale, format_=args.format,
+             on_top=args.on_top)
