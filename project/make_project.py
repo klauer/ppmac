@@ -31,16 +31,21 @@ ProgramBufSize=16777216
 '''
 
 remote_base_path = '/var/ftp/usrflash'
-special_files = {
-    'pp_proj.ini' : 'Project/Configuration',
-}
+special_files = {'pp_proj.ini': 'Project/Configuration',
+                 'pre_make.cfg': '',
+                 'post_make.cfg': '',
+                 }
+
 
 def get_c_path(base_path, fn):
     no_ext = os.path.splitext(fn)[0]
     if fn.startswith('bgcplc'):
         return 'Project/C Language/CPLCs/%s' % no_ext
+    elif fn.startswith('usr_'):
+        return 'Project/C Language/Realtime Routines/%s' % no_ext
     else:
         raise
+
 
 def get_pmc_path(base_path, fn):
     options = [('Project/PMAC Script Language/Libraries', 'open subprog'),
@@ -58,13 +63,14 @@ def get_pmc_path(base_path, fn):
 
     return subdir
 
-ext_paths = {
-    '.plc' : 'Project/PMAC Script Language/PLC Programs',
-    '.pmh' : 'Project/PMAC Script Language/Global Includes',
-    '.pmc' : get_pmc_path,
-    '.cfg' : 'Project/Configuration',
-    '.c'   : get_c_path,
-}
+ext_paths = {'.plc': 'Project/PMAC Script Language/PLC Programs',
+             '.pmh': 'Project/PMAC Script Language/Global Includes',
+             '.pmc': get_pmc_path,
+             '.cfg': 'Project/Configuration',
+             '.c': get_c_path,
+             '.h': 'Project/C Language/Include',
+             }
+
 
 def get_paths(base_path, fn, include_fn=False):
     ext = os.path.splitext(fn)[1]
@@ -80,7 +86,7 @@ def get_paths(base_path, fn, include_fn=False):
     if hasattr(subdir, '__call__'):
         subdir = subdir(base_path, fn)
 
-    print(fn, subdir)
+    print('%s -> %s' % (fn, subdir))
     try:
         local_dir = os.path.join(base_path, subdir)
         #print("Making path:", local_dir)
@@ -96,6 +102,7 @@ def get_paths(base_path, fn, include_fn=False):
 
     return local_dir, remote_dir
 
+
 def create_makefile(local_path, release=True, template='bgcplc_makefile'):
     if release:
         dt_debug_flags = '-O2'
@@ -110,7 +117,9 @@ def create_makefile(local_path, release=True, template='bgcplc_makefile'):
 
     subdir = os.path.split(local_path)[-1]
     if subdir.startswith('bgcplc'):
-        output_fn = 'libplcc%d.so' % int(subdir[-2:])
+        output_fn = '/var/ftp/usrflash/Project/C\ Language/CPLCs/user/libplcc%d.so' % int(subdir[-2:])
+    elif subdir.startswith('usr_'):
+        output_fn = '/var/ftp/usrflash/Project/C\ Language/Realtime\ Routines/%s.so' % subdir
     else:
         raise NotImplementedError('Unknown type: %s' % subdir)
 
@@ -139,6 +148,7 @@ def fix_path(base_path, source):
     shutil.copyfile(source, local_file)
     return local_file, remote_file
 
+
 def output_config(base_path, project_files, release=True):
     pmac_programs = []
     linux_programs = []
@@ -150,10 +160,14 @@ def output_config(base_path, project_files, release=True):
             continue
 
         local_file, remote_file = fix_path(base_path, fn)
-        if os.path.splitext(fn)[1] in ('.c', ):
+        file_ext = os.path.splitext(fn)[1]
+        if file_ext in ('.c', ):
             rtusrcode.append('file%d=%s' % (len(rtusrcode) + 1, remote_file))
             #linux_programs.append('file%d=%s' % (len(linux_programs) + 1, remote_file))
             makefile_paths.add(os.path.split(local_file)[0])
+        elif file_ext in ('.h', ):
+            # Don't add it to the project ini file
+            pass
         else:
             pmac_programs.append('file%d=%s' % (len(pmac_programs) + 1, remote_file))
 
@@ -166,7 +180,8 @@ def output_config(base_path, project_files, release=True):
     pmac_programs.append('last_file_number=%d' % i)
     pmac_programs = '\n'.join(pmac_programs)
     linux_programs = '\n'.join(linux_programs)
-    rtusrcode = '\n'.join(rtusrcode)
+    #rtusrcode = '\n'.join(rtusrcode)
+    rtusrcode = ''
     custom_config_file = ''
 
     print('Configuration in', local_cfg)

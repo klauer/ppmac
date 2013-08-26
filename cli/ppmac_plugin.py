@@ -280,19 +280,16 @@ class PpmacCore(Configurable):
         except GPError as ex:
             print(ex)
 
-    @magic_arguments()
-    @argument('cmd', type=unicode, nargs='+', help='Command to send')
-    def shell_cmd(self, magic_args, arg):
+    @PpmacExport
+    def shell_cmd(self, line):
         """
         Send a shell command (e.g., ls)
         """
 
-        args = parse_argstring(self.shell_cmd, arg)
-
-        if not args or not self.check_comm():
+        if not line or not self.check_comm():
             return
 
-        self.comm.shell_command(' '.join(args.cmd), verbose=True)
+        self.comm.shell_command(line, verbose=True)
 
     @magic_arguments()
     @argument('first_motor', default=1, nargs='?', type=int,
@@ -857,7 +854,7 @@ class PpmacCore(Configurable):
 
     @magic_arguments()
     @argument('-d', '--disable', default=False, action='store_true',
-              help='Plot all items')
+              help='Disable WpKey settings (set to 0)')
     def wpkey(self, magic_self, arg):
         args = parse_argstring(self.wpkey, arg)
 
@@ -872,4 +869,74 @@ class PpmacCore(Configurable):
             print('Enabling')
             self.set_verbose('Sys.WpKey', enabled_str)
 
+    @magic_arguments()
+    @argument('name', type=unicode,
+              help='Executable name')
+    @argument('source_files', type=unicode, nargs='+',
+              help='Source files')
+    @argument('-d', '--dest', type=unicode, nargs='?',
+              default='/var/ftp/usrflash',
+              help='Destination path for files')
+    def util_build(self, magic_self, arg):
+        args = parse_argstring(self.util_build, arg)
 
+        if not args or not self.check_comm():
+            return
+
+        return build_utility(self.comm, args.source_files, args.name,
+                             dest_path=args.dest, verbose=True)
+
+    @magic_arguments()
+    @argument('module', type=unicode,
+              help='Kernel module remote filename')
+    @argument('name', type=unicode,
+              help='Phase function name')
+    @argument('motors', type=int, nargs='+',
+              help='Motor number(s)')
+    def userphase(self, magic_self, arg):
+        args = parse_argstring(self.userphase, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        self.comm.open_gpascii()
+        for motor in args.motors:
+            self.comm.send_line('Motor[%d].PhaseCtrl=0' % motor)
+        self.comm.close_gpascii()
+
+
+
+        self.comm.open_gpascii()
+        for motor in args.motors:
+            self.comm.send_line('Motor[%d].PhaseCtrl=1' % motor)
+
+@PpmacExport
+def build_utility(comm, source_files, output_name,
+                  dest_path='/var/ftp/usrflash',
+                  verbose=False, cleanup=True,
+                  **kwargs):
+
+    make_path = os.path.join(MODULE_PATH, 'util_makefile')
+    makefile = open(make_path, 'rt').read()
+
+    makefile = makefile % dict(source_files=' '.join(source_files),
+                               output_name=output_name)
+
+    comm.send_file(os.path.join(dest_path, 'Makefile'), makefile)
+    print('Sending Makefile')
+    for fn in source_files:
+        text = open(fn, 'r').read()
+        dest_fn = os.path.join(dest_path, os.path.split(fn)[-1])
+        print('Sending', dest_fn)
+        comm.send_file(dest_fn, text)
+
+    comm.send_line('cd %s' % dest_path)
+    print('Building...')
+    comm.shell_command('make', verbose=verbose,
+                            **kwargs)
+
+    if cleanup:
+        print('Cleaning up...')
+        for fn in source_files:
+            comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, fn)))
+        comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, 'Makefile')))

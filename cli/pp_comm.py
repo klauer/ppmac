@@ -51,12 +51,18 @@ class PPComm(object):
         if cmd:
             channel.send('%s\n' % cmd)
 
+        print(channel.recv(1024))
+
         self._client = client
         self._channel = channel
         self._channel_cmd = cmd
         if not cmd:
             # Turn off local echoing of commands
-            self.shell_command('stty -echo')
+            self.send_line('/bin/bash --noediting')
+            self.send_line('stty -echo')
+            time.sleep(0.2)
+            print(channel.recv(1024))
+            print('-- connect done')
         return client, channel
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
@@ -127,7 +133,7 @@ class PPComm(object):
 
     def send_file(self, filename, contents):
         eof_tag = 'FILE_EOF_FILE_EOF'
-        cmd = '''cat > "%(filename)s" <<'%(eof_tag)s'
+        cmd = '''cat 2> /dev/null > "%(filename)s" <<'%(eof_tag)s'
 %(contents)s
 %(eof_tag)s
 ''' % locals()

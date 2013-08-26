@@ -38,7 +38,7 @@ LDFLAGS = -shared -lpthread_rt -lrt \
 -Wl,-rpath,/var/ftp/usrflash/Project/C\ Language/Libraries \
 
 RM = rm -f
-PROG = /var/ftp/usrflash/Project/C\ Language/CPLCs/user/%(output_fn)s
+PROG = %(output_fn)s
 SRCS = %(source_files)s
 
 OBJS = $(SRCS:.c=.o)
