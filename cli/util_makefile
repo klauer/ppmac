@@ -1,4 +1,5 @@
-# from http://forums.deltatau.com/showthread.php?tid=1207
+# Utility (non-realtime, general purpose ppmac) program building template
+# Modified from http://forums.deltatau.com/showthread.php?tid=1207
 #
 # All source (.c) files
 SRCS = %(source_files)s

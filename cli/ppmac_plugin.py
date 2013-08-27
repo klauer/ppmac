@@ -911,18 +911,23 @@ class PpmacCore(Configurable):
             self.comm.send_line('Motor[%d].PhaseCtrl=1' % motor)
 
 @PpmacExport
+def create_util_makefile(source_files, output_name):
+    make_path = os.path.join(MODULE_PATH, 'util_makefile')
+    makefile = open(make_path, 'rt').read()
+
+    text = makefile % dict(source_files=' '.join(source_files),
+                           output_name=output_name)
+    return text
+
+@PpmacExport
 def build_utility(comm, source_files, output_name,
                   dest_path='/var/ftp/usrflash',
                   verbose=False, cleanup=True,
                   **kwargs):
 
-    make_path = os.path.join(MODULE_PATH, 'util_makefile')
-    makefile = open(make_path, 'rt').read()
+    makefile_text = create_util_makefile(source_files, output_name)
 
-    makefile = makefile % dict(source_files=' '.join(source_files),
-                               output_name=output_name)
-
-    comm.send_file(os.path.join(dest_path, 'Makefile'), makefile)
+    comm.send_file(os.path.join(dest_path, 'Makefile'), makefile_text)
     print('Sending Makefile')
     for fn in source_files:
         text = open(fn, 'r').read()
