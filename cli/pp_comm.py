@@ -93,7 +93,8 @@ class PPComm(object):
 
         raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
-    def wait_for(self, wait_pattern, timeout=5.0, **kwargs):
+    def wait_for(self, wait_pattern, timeout=5.0, verbose=False,
+                 remove_matching=[], **kwargs):
         channel = self._channel
         wait_re = re.compile(wait_pattern)
 
@@ -105,16 +106,37 @@ class PPComm(object):
             m = wait_re.match(line)
             if m is not None:
                 return lines, m.groups()
-            lines.append(line)
+
+            if verbose:
+                print(line)
+
+            skip = False
+            for regex in remove_matching:
+                m = regex.match(line)
+                if m is not None:
+                    skip = True
+                    break
+
+            if not skip:
+                lines.append(line)
 
         return None
 
-    def shell_command(self, command, wait=True, done_tag='.CMD_DONE.', **kwargs):
+    def shell_command(self, command, wait=True, done_tag='.CMD_DONE.',
+                      remove_ppmac_messages=True, **kwargs):
         self.close_gpascii()
 
         self.send_line(command)
         self.send_line('echo "%s"' % done_tag)
-        return self.wait_for('.*(%s)$' % re.escape(done_tag), **kwargs)[0]
+        if remove_ppmac_messages:
+            matches = [re.compile('.*\/\/ \*\*\* exit'),
+                       re.compile('^UnlinkGatherThread:.*'),
+                       ]
+        else:
+            matches = []
+
+        return self.wait_for('.*(%s)$' % re.escape(done_tag),
+                             remove_matching=matches, **kwargs)[0]
 
     def read_file(self, filename):
         eof_tag = 'FILE_EOF_FILE_EOF'
@@ -161,14 +183,14 @@ class PPComm(object):
         if check:
             return self.get_variable(var)
 
-    def get_variable(self, var, type_=str):
+    def get_variable(self, var, type_=str, timeout=0.2):
         if not self._gpascii:
             self.open_gpascii()
 
         var = var.lower()
         self.send_line(var)
 
-        for line in self.read_timeout():
+        for line in self.read_timeout(timeout=timeout):
             if 'error' in line:
                 raise GPError(line)
             #print('<-', line)
