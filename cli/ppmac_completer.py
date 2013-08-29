@@ -20,13 +20,6 @@ import sqlite3 as sqlite
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
-def fetchall(c):
-    while True:
-        row = c.fetchone()
-        if row is None:
-            break
-        yield row
-
 
 def get_index(name):
     m = re.search('\[(\d+)\]', name)
@@ -61,7 +54,8 @@ def check_alias(c, name):
 
 
 class PPCompleterNode(object):
-    def __init__(self, conn, parent, row, index=None):
+    def __init__(self, conn, parent, row, index=None, ppmac=None):
+        self.ppmac = ppmac
         self.conn = conn
         self.row = row
         self.index = index
@@ -154,9 +148,11 @@ class PPCompleterNode(object):
             return self._cache[full_name]
         except KeyError:
             if full_name.endswith('[]'):
-                node = PPCompleterList(self.conn, self.full_name, row)
+                node = PPCompleterList(self.conn, self.full_name, row,
+                                       ppmac=self.ppmac)
             else:
-                node = PPCompleterNode(self.conn, self.full_name, row)
+                node = PPCompleterNode(self.conn, self.full_name, row,
+                                       ppmac=self.ppmac)
 
             self._cache[full_name] = node
             return node
@@ -169,7 +165,7 @@ class PPCompleterNode(object):
 
             return self._get_node(self.info[key])
         except KeyError:
-            raise AttributeError(key)
+            raise AttributeError('%s.%s' % (str(self), key))
 
     @property
     def name(self):
@@ -200,17 +196,26 @@ class PPCompleterNode(object):
     def __str__(self):
         return self.full_name
 
+    @property
+    def value(self):
+        if self.ppmac is not None:
+            return self.ppmac.get_variable(self.full_name)
+        else:
+            return None
+
     __repr__ = __str__
 
 
 class PPCompleterList(object):
-    def __init__(self, conn, parent, row):
+    def __init__(self, conn, parent, row, ppmac=None):
+        self.ppmac = ppmac
         self.conn = conn
         self.row = row
         self.name = row['Command']
         self.parent = parent
-        self.item0 = PPCompleterNode(self.conn, self.parent, self.row, index=0)
-        self.items = { 0 : self.item0 }
+        self.item0 = PPCompleterNode(self.conn, self.parent, self.row, index=0,
+                                     ppmac=ppmac)
+        self.items = {0: self.item0}
 
     @property
     def full_name(self):
@@ -223,7 +228,8 @@ class PPCompleterList(object):
         try:
             return self.items[idx]
         except KeyError:
-            node = PPCompleterNode(self.conn, self.parent, self.row, index=idx)
+            node = PPCompleterNode(self.conn, self.parent, self.row, index=idx,
+                                   ppmac=self.ppmac)
             self.items[idx] = node
             return node
 
@@ -245,8 +251,9 @@ class PPCompleterList(object):
 
 
 class PPCompleter(object):
-    def __init__(self, conn):
+    def __init__(self, conn, ppmac=None):
         self.conn = conn
+        self.ppmac = ppmac
 
         tbl0 = conn.cursor()
         tbl0.execute('select * from software_tbl0')
@@ -264,9 +271,9 @@ class PPCompleter(object):
             return self._cache[full_name]
         except KeyError:
             if full_name.endswith('[]'):
-                node = PPCompleterList(self.conn, '', row)
+                node = PPCompleterList(self.conn, '', row, ppmac=self.ppmac)
             else:
-                node = PPCompleterNode(self.conn, '', row)
+                node = PPCompleterNode(self.conn, '', row, ppmac=self.ppmac)
 
             self._cache[full_name] = node
             return node
@@ -327,20 +334,20 @@ def dict_factory(cursor, row):
     return d
 
 
-def start_completer_from_db(dbfile=':memory:'):
+def start_completer_from_db(dbfile=':memory:', ppmac=None):
     conn = sqlite.connect(dbfile)
     conn.row_factory = dict_factory
-    return PPCompleter(conn)
+    return PPCompleter(conn, ppmac=ppmac)
 
 
-def start_completer_from_sql_script(script, db_file):
+def start_completer_from_sql_script(script, db_file, ppmac=None):
     conn = sqlite.connect(db_file)
     conn.row_factory = dict_factory
 
     c = conn.cursor()
     c.executescript(script)
     conn.commit()
-    return PPCompleter(conn)
+    return PPCompleter(conn, ppmac=ppmac)
 
 
 def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
