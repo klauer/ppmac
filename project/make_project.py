@@ -31,10 +31,6 @@ ProgramBufSize=16777216
 '''
 
 remote_base_path = '/var/ftp/usrflash'
-special_files = {'pp_proj.ini': 'Project/Configuration',
-                 'pre_make.cfg': '',
-                 'post_make.cfg': '',
-                 }
 
 
 def get_c_path(base_path, fn):
@@ -63,10 +59,19 @@ def get_pmc_path(base_path, fn):
 
     return subdir
 
+def get_cfg_path(base_path, fn):
+    if fn in ('pre_make.cfg', 'post_make.cfg'):
+        return ''
+    elif fn.startswith('load_delay'):
+        return ''
+    else:
+        return 'Project/Configuration'
+
 ext_paths = {'.plc': 'Project/PMAC Script Language/PLC Programs',
              '.pmh': 'Project/PMAC Script Language/Global Includes',
              '.pmc': get_pmc_path,
-             '.cfg': 'Project/Configuration',
+             '.cfg': get_cfg_path,
+             '.ini': 'Project/Configuration',
              '.c': get_c_path,
              '.h': 'Project/C Language/Include',
              }
@@ -75,13 +80,11 @@ ext_paths = {'.plc': 'Project/PMAC Script Language/PLC Programs',
 def get_paths(base_path, fn, include_fn=False):
     ext = os.path.splitext(fn)[1]
     just_fn = os.path.split(fn)[1]
-    try:
-        subdir = special_files[just_fn]
-    except KeyError:
-        if ext in ext_paths:
-            subdir = ext_paths[ext]
-        else:
-            raise ValueError('Unknown file extension (%s) ignoring' % (fn))
+
+    if ext in ext_paths:
+        subdir = ext_paths[ext]
+    else:
+        raise ValueError('Unknown file extension (%s) ignoring' % (fn))
 
     if hasattr(subdir, '__call__'):
         subdir = subdir(base_path, fn)

@@ -3,4 +3,4 @@ export PPMAC_FILES=motor1.cfg motor2.cfg base.cfg plcs.plc subprog1.pmc piezo_mo
 
 all:
 	rm -rf proj_temp
-	./load_config 
+	sh ./upload_config.sh
