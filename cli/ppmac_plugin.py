@@ -13,6 +13,7 @@ from __future__ import print_function
 import logging
 import os
 import sys
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -126,7 +127,7 @@ class PpmacCore(Configurable):
         c = None
         if os.path.exists(db_file):
             try:
-                c = completer.start_completer_from_db(db_file)
+                c = completer.start_completer_from_db(db_file, ppmac=self.comm)
             except Exception as ex:
                 print('Unable to load current db file: %s (%s) %s' %
                       (db_file, ex.__class__.__name__, ex))
@@ -181,6 +182,10 @@ class PpmacCore(Configurable):
         self.comm = PPComm(host=host, port=port,
                            user=user, password=password)
         self.comm.open_channel()
+
+        if self.use_completer_db:
+            self.completer = None
+            self.open_completer_db()
 
     def check_comm(self):
         if self.comm is None:
@@ -799,7 +804,7 @@ class PpmacCore(Configurable):
         args = parse_argstring(self.search, arg)
 
         if not args:
-            Return
+            return
 
         obj = self.completer.check(args.variable)
         items = obj.search(args.text)
@@ -877,6 +882,9 @@ class PpmacCore(Configurable):
     @argument('-d', '--dest', type=unicode, nargs='?',
               default='/var/ftp/usrflash',
               help='Destination path for files')
+    @argument('-r', '--run', type=unicode, nargs='*',
+              default='',
+              help='Run the built program, with specified arguments')
     def util_build(self, magic_self, arg):
         args = parse_argstring(self.util_build, arg)
 
@@ -884,7 +892,8 @@ class PpmacCore(Configurable):
             return
 
         return build_utility(self.comm, args.source_files, args.name,
-                             dest_path=args.dest, verbose=True)
+                             dest_path=args.dest, verbose=True,
+                             run=args.run)
 
     @magic_arguments()
     @argument('module', type=unicode,
@@ -893,22 +902,182 @@ class PpmacCore(Configurable):
               help='Phase function name')
     @argument('motors', type=int, nargs='+',
               help='Motor number(s)')
+    @argument('-u', '--unload', action='store_true',
+              help='Unload kernel module first (reload)')
     def userphase(self, magic_self, arg):
         args = parse_argstring(self.userphase, arg)
 
         if not args or not self.check_comm():
             return
 
-        self.comm.open_gpascii()
+        if args.unload:
+            self.comm.shell_command('rmmod %s' % args.module, verbose=True)
+
         for motor in args.motors:
-            self.comm.send_line('Motor[%d].PhaseCtrl=0' % motor)
-        self.comm.close_gpascii()
+            self.comm.set_variable('Motor[%d].PhaseCtrl' % motor, 0)
+
+        self.comm.shell_command('insmod %s' % args.module, verbose=True)
+        self.comm.shell_command('lsmod |grep %s' % args.module, verbose=True)
+
+        for motor in args.motors:
+            self.comm.shell_command('/var/ftp/usrflash/userphase -l %d %s' % (motor, args.name),
+                                    verbose=True)
+
+        for motor in args.motors:
+            self.comm.set_variable('Motor[%d].PhaseCtrl' % motor, 1)
 
 
+    @magic_arguments()
+    @argument('coord', type=int,
+              help='Coordinate system')
+    @argument('program', type=int,
+              help='Program number')
+    @argument('variables', nargs='*', type=unicode,
+              help='Variables to monitor while running')
+    def prog_run(self, magic_self, arg):
+        args = parse_argstring(self.prog_run, arg)
+
+        if not args or not self.check_comm():
+            return
 
         self.comm.open_gpascii()
-        for motor in args.motors:
-            self.comm.send_line('Motor[%d].PhaseCtrl=1' % motor)
+        try:
+            self.comm.send_line('&%db%dr' % (args.coord, args.program))
+        except GPError as ex:
+            print(ex)
+            if 'READY TO RUN' in str(ex):
+                print('Are all motors in the coordinate system in closed loop?')
+            return
+
+        time.sleep(0.1)
+
+        print('Coord %d Program %d' % (args.coord, args.program))
+        active_var = 'Coord[%d].ProgActive' % args.program
+        def get_active():
+            return self.comm.get_variable(active_var, type_=int)
+
+        last_values = [self.comm.get_variable(var)
+                       for var in args.variables]
+
+        for var, value in zip(args.variables, last_values):
+            print('%s = %s' % (var, value))
+
+        try:
+            while get_active():
+                if not args.variables:
+                    time.sleep(0.1)
+                else:
+                    values = [self.comm.get_variable(var)
+                              for var in args.variables]
+                    for var, old_value, new_value in zip(args.variables,
+                                                         last_values, values):
+                        if old_value != new_value:
+                            print('%s = %s' % (var, new_value))
+
+                    last_values = values
+
+        except KeyboardInterrupt:
+            if get_active():
+                print("Aborting...")
+                self.comm.send_line('&%db%da' % (args.coord, args.program))
+
+        print('Done (%s = %s)' % (active_var, get_active()))
+
+    @magic_arguments()
+    @argument('variables', nargs='+', type=unicode,
+              help='Variables to monitor')
+    def monitor(self, magic_self, arg):
+        '''
+        Low-speed (compared to gather) monitoring of variables
+        '''
+        args = parse_argstring(self.monitor, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        last_values = [self.comm.get_variable(var)
+                       for var in args.variables]
+
+        for var, value in zip(args.variables, last_values):
+            print('%s = %s' % (var, value))
+
+        try:
+            while True:
+                values = [self.comm.get_variable(var)
+                          for var in args.variables]
+                for var, old_value, new_value in zip(args.variables,
+                                                     last_values, values):
+                    if old_value != new_value:
+                        print('%s = %s' % (var, new_value))
+
+                last_values = values
+
+        except KeyboardInterrupt:
+            pass
+
+    @magic_arguments()
+    @argument('base', type=unicode,
+              help='Variable to monitor')
+    @argument('ignore', nargs='*', type=unicode,
+              help='Variable(s) to ignore')
+    def monitorc(self, magic_self, arg):
+        '''
+        Low-speed (compared to gather) monitoring of variables
+        using the completer.
+
+        >>> monitorc Motor[1]
+            monitors PosSf, Pos, etc.
+        '''
+        args = parse_argstring(self.monitorc, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        if self.completer is None:
+            print('Completer not enabled')
+            return
+
+        def get_variables(var):
+            obj = self.completer.check(var)
+            return ['%s.%s' % (var, attr) for attr in dir(obj)]
+
+        def get_values(vars_):
+            ret = []
+            for var in vars_:
+                try:
+                    ret.append(self.comm.get_variable(var))
+                except (GPError, TimeoutError) as ex:
+                    #print('Error', ex)
+                    ret.append('')
+            return ret
+
+        variables = get_variables(args.base)
+        for ignore in args.ignore:
+            if ignore in variables:
+                variables.remove(ignore)
+
+        last_values = get_values(variables)
+        for var, value in zip(variables, last_values):
+            print('%s = %s' % (var, value))
+
+        change_set = set()
+
+        try:
+            while True:
+                values = get_values(variables)
+                for var, old_value, new_value in zip(variables,
+                                                     last_values, values):
+                    if old_value != new_value:
+                        print('%s = %s' % (var, new_value))
+                        change_set.add(var)
+
+                last_values = values
+
+        except KeyboardInterrupt:
+            if change_set:
+                print("Variables changed:")
+                for var in sorted(change_set):
+                    print(var)
 
 @PpmacExport
 def create_util_makefile(source_files, output_name):
@@ -919,10 +1088,12 @@ def create_util_makefile(source_files, output_name):
                            output_name=output_name)
     return text
 
+
 @PpmacExport
 def build_utility(comm, source_files, output_name,
                   dest_path='/var/ftp/usrflash',
                   verbose=False, cleanup=True,
+                  run=None,
                   **kwargs):
 
     makefile_text = create_util_makefile(source_files, output_name)
@@ -937,11 +1108,21 @@ def build_utility(comm, source_files, output_name,
 
     comm.send_line('cd %s' % dest_path)
     print('Building...')
-    comm.shell_command('make', verbose=verbose,
-                            **kwargs)
+    lines = comm.shell_command('make', verbose=verbose,
+                               **kwargs)
 
     if cleanup:
         print('Cleaning up...')
         for fn in source_files:
             comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, fn)))
         comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, 'Makefile')))
+
+    errored = False
+    for line in lines:
+        if 'error' in line.lower():
+            errored = True
+
+    if not errored and run is not None:
+        run = ' '.join(run)
+        comm.shell_command('%s %s' % (output_name, run),
+                           verbose=True)
