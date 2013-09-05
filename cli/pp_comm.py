@@ -15,9 +15,12 @@ class CommandFailedError(PPCommError): pass
 class TimeoutError(PPCommError): pass
 class GPError(PPCommError): pass
 
+
 class PPComm(object):
     VAR_SERVO_PERIOD = 'Sys.ServoPeriod'
     CMD_GPASCII = 'gpascii -2'
+    EOT = '\04'
+
     def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
                  user=PPMAC_USER, password=PPMAC_PASS):
         self._host = host
@@ -51,8 +54,6 @@ class PPComm(object):
         if cmd:
             channel.send('%s\n' % cmd)
 
-        print(channel.recv(1024))
-
         self._client = client
         self._channel = channel
         self._channel_cmd = cmd
@@ -60,9 +61,8 @@ class PPComm(object):
             # Turn off local echoing of commands
             self.send_line('/bin/bash --noediting')
             self.send_line('stty -echo')
-            time.sleep(0.2)
-            print(channel.recv(1024))
-            print('-- connect done')
+            self.wait_for('%s@.*' % self._user)
+
         return client, channel
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
@@ -95,11 +95,12 @@ class PPComm(object):
 
     def wait_for(self, wait_pattern, timeout=5.0, verbose=False,
                  remove_matching=[], **kwargs):
-        channel = self._channel
         wait_re = re.compile(wait_pattern)
 
         lines = []
         for line in self.read_timeout(timeout, **kwargs):
+            #if not verbose:
+            #    print('* %s' % line)
             if line == wait_pattern:
                 return lines, []
 
@@ -122,10 +123,22 @@ class PPComm(object):
 
         return None
 
+    def sync(self, verbose=False):
+        channel = self._channel
+
+        while channel.recv_ready():
+            data = channel.recv(1024)
+            if verbose:
+                print(data, end='')
+
+        if verbose:
+            print()
+
     def shell_command(self, command, wait=True, done_tag='.CMD_DONE.',
                       remove_ppmac_messages=True, **kwargs):
         self.close_gpascii()
 
+        self.sync()
         self.send_line(command)
         self.send_line('echo "%s"' % done_tag)
         if remove_ppmac_messages:
@@ -138,10 +151,10 @@ class PPComm(object):
         return self.wait_for('.*(%s)$' % re.escape(done_tag),
                              remove_matching=matches, **kwargs)[0]
 
-    def read_file(self, filename):
+    def read_file(self, filename, timeout=5.0):
         eof_tag = 'FILE_EOF_FILE_EOF'
         cmd = 'cat "%(filename)s"' % locals()
-        lines = self.shell_command(cmd)
+        lines = self.shell_command(cmd, timeout=timeout)
 
         # just quick hacks, as usual
         first_idx = 0
@@ -149,8 +162,10 @@ class PPComm(object):
             if cmd in line:
                 first_idx = i + 1
         lines = lines[first_idx:]
-        while eof_tag in lines[-1] or not lines[-1].strip():
+        while lines and (eof_tag in lines[-1] or not lines[-1].strip()):
             lines = lines[:-1]
+
+        #print('Read %d lines of file %s' % (len(lines), filename))
         return lines
 
     def send_file(self, filename, contents):
@@ -168,12 +183,12 @@ class PPComm(object):
 
     def open_gpascii(self):
         if not self._gpascii:
+            self.sync()
             self.send_line(self.CMD_GPASCII)
             if self.wait_for('.*(STDIN Open for ASCII Input)$'):
                 self._gpascii = True
                 #print('GPASCII mode')
 
-    EOT = '\04'
     def set_variable(self, var, value, check=True):
         if not self._gpascii:
             self.open_gpascii()
@@ -214,6 +229,7 @@ class PPComm(object):
     def close_gpascii(self):
         if self._gpascii:
             channel = self._channel
+            self.sync()
             channel.send(self.EOT)
             self._gpascii = False
 

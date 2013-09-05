@@ -372,6 +372,7 @@ class PpmacCore(Configurable):
             raise KeyError('gather.addr: Unable to read addresses from settings file')
 
         if verbose:
+            #print('Settings are: %s' % settings)
             print('Reading gather data... ', end='')
             sys.stdout.flush()
 

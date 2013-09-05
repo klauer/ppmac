@@ -13,7 +13,7 @@ from __future__ import print_function
 import os
 import time
 import re
-
+import sys
 import ast
 
 import matplotlib.pyplot as plt
@@ -132,8 +132,18 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
 
     comm.shell_command('gpascii -i%s' % gather_config_file)
 
+    max_lines = comm.get_variable('gather.maxlines', type_=int)
+    if max_lines < total_samples:
+        total_samples = max_lines
+        duration = get_duration(period, total_samples)
+        comm.set_variable('gather.maxsamples', total_samples)
+
+        print('* Warning: Buffer not large enough.')
+        print('  Maximum count with the current addresses: %d' % (max_lines, ))
+        print('  New duration is: %.2f s' % (duration, ))
+
     comm.open_gpascii()
-    comm.send_line('gather.enable=2')
+    comm.set_variable('gather.enable', 2)
     samples = 0
 
     print('Waiting for %d samples' % total_samples)
@@ -142,21 +152,26 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
             samples = comm.get_variable('gather.samples', type_=int)
             if total_samples != 0:
                 percent = 100. * (float(samples) / total_samples)
-                print('%d/%d (%.2f%%)' % (samples, total_samples,
-                                          percent))
+                print('%-6d/%-6d (%.2f%%)' % (samples, total_samples,
+                                              percent),
+                      end='\r')
+                sys.stdout.flush()
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
+    finally:
+        print()
 
-    comm.send_line('gather.enable=0')
+    comm.set_variable('gather.enable', 0)
     comm.close_gpascii()
     return get_gather_results(comm, addresses, output_file)
 
 
 def get_gather_results(comm, addresses, output_file=gather_output_file):
+    # -u is for upload
     comm.shell_command('gather %s -u' % (output_file, ))
     return parse_gather(addresses,
-                        comm.read_file(output_file))
+                        comm.read_file(output_file, timeout=60.0))
 
 
 def gather_data_to_file(fn, addr, data, delim='\t'):
@@ -182,7 +197,7 @@ def plot(addr, data):
             pass
         else:
             plt.figure(i)
-            plt.plot(x_axis, data[:, i] - data[0, i], label=addr[i])
+            plt.plot(x_axis, data[:, i], label=addr[i])
             plt.legend()
 
     print('Plotting...')
@@ -362,5 +377,5 @@ if __name__ == '__main__':
 # set gather.enable=2
 # ... poll gather.samples, gather.enable
 # gather.enable=0
-# gather /var/ftp/gather/GatherFile.txt -u
+# gather /var/ftp/gather/GatherFile.txt -u (-u means upload)
 # results in GatherFile.txt
