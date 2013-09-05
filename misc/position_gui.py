@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import argparse
+import copy
 
 from PyQt4 import (QtGui, QtCore)
 from PyQt4.QtCore import Qt
@@ -54,16 +55,36 @@ class PositionMonitor(QtGui.QFrame):
 
         QtCore.QTimer.singleShot(0, self.update)
 
+    def reconnect(self):
+        print('Reconnecting...')
+        try:
+            comm = copy.copy(self.comm)
+        except:
+            return
+        else:
+            self.comm = comm
+
     def update(self):
         t0 = time.time()
 
         motors = self.motors
         comm = self.comm
 
-        act_pos = [comm.get_variable('Motor[%d].ActPos' % i, type_=float)
-                   for i in motors]
-        home_pos = [comm.get_variable('Motor[%d].HomePos' % i, type_=float)
-                    for i in motors]
+        if self.comm is None:
+            self.reconnect()
+            if self.comm is None:
+                return
+
+        try:
+            act_pos = [comm.get_variable('Motor[%d].ActPos' % i, type_=float)
+                       for i in motors]
+            home_pos = [comm.get_variable('Motor[%d].HomePos' % i, type_=float)
+                        for i in motors]
+        except pp_comm.TimeoutError:
+            self.reconnect()
+            QtCore.QTimer.singleShot(5000.0, self.update)
+            return
+
         rel_pos = [self.scale * (act - home)
                    for act, home in zip(act_pos, home_pos)]
 
