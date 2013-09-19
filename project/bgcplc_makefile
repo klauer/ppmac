@@ -50,7 +50,7 @@ $(PROG): $(OBJS)
 	$(LD) -o $(PROG) $(OBJS) $(LDFLAGS) 
 
 %%.o: %%.c
-	$(CPP) $(CFLAGS) $(DTDEBUG) -c $<
+	#$(CPP) $(CFLAGS) $(DTDEBUG) -c $<
 	$(CC) $(CFLAGS) $(DTDEBUG) -c $< 
 
 
