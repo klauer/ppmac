@@ -70,7 +70,13 @@ class PPComm(object):
 
         t0 = time.time()
         buf = ''
-        while channel.recv_ready() or ((time.time() - t0) < timeout):
+
+        def check_timeout():
+            if timeout is None:
+                return True
+            return ((time.time() - t0) <= timeout)
+
+        while channel.recv_ready() or check_timeout():
             if channel.recv_ready():
                 buf += channel.recv(1024)
                 lines = buf.split(delim)
