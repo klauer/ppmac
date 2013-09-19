@@ -119,7 +119,7 @@ all: $(PROG)
 
 $(PROG): $(OBJS)
 	@echo "Linking object files with output."
-	$(CC) -o $(PROG) $(OBJS) $(LDFLAGS) $(LIBS) $(WRAP)
+	@$(CC) -o $(PROG) $(OBJS) $(LDFLAGS) $(LIBS) $(WRAP)
 	@echo "Linking complete."
 	@echo "Cleaning up build directory."
 	@rm *.o
