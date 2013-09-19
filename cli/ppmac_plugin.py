@@ -32,6 +32,7 @@ from pp_comm import GPError
 import ppmac_gather as gather
 import ppmac_completer as completer
 import ppmac_tune as tune
+import ppmac_const as const
 
 logger = logging.getLogger('PpmacCore')
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -96,7 +97,7 @@ class PpmacCore(Configurable):
     completer_db_file = traitlets.Unicode('ppmac.db', config=True)
 
     def __init__(self, shell, config):
-        PpmacCore.EXPORTS = {}
+        PpmacCore.instance = self
 
         util.__pp_plugin__ = self
 
@@ -274,14 +275,18 @@ class PpmacCore(Configurable):
         if not args:
             return
 
-        var, value = args.variable, args.value
+        if '=' in args.variable:
+            var, value = args.variable.split('=')[:2]
+        else:
+            var, value = args.variable, args.value
+
         try:
             if value is None:
-                print('%s=%s' % (args.variable,
-                                 self.comm.get_variable(args.variable)))
+                print('%s=%s' % (var,
+                                 self.comm.get_variable(var)))
             else:
-                print('%s=%s' % (args.variable,
-                                 self.comm.set_variable(args.variable, args.value)))
+                print('%s=%s' % (var,
+                                 self.comm.set_variable(var, value)))
         except GPError as ex:
             print(ex)
 
@@ -809,13 +814,13 @@ class PpmacCore(Configurable):
 
         obj = self.completer.check(args.variable)
         items = obj.search(args.text)
+
         def fix_row(row):
             return ' | '.join([str(item) for item in row
                               if item not in (u'NULL', None)])
         for key, info in items.items():
             row = fix_row(info.values())
             print('%s: %s' % (key, row))
-
 
     @magic_arguments()
     @argument('num', default=1, type=int,
@@ -927,7 +932,6 @@ class PpmacCore(Configurable):
         for motor in args.motors:
             self.comm.set_variable('Motor[%d].PhaseCtrl' % motor, 1)
 
-
     @magic_arguments()
     @argument('coord', type=int,
               help='Coordinate system')
@@ -984,6 +988,12 @@ class PpmacCore(Configurable):
 
         print('Done (%s = %s)' % (active_var, get_active()))
 
+        error_status = 'Coord[%d].ErrorStatus' % args.coord
+        errno = self.comm.get_variable(error_status, type_=int)
+
+        if errno in const.coord_errors:
+            print('Error: (%s) %s' % (const.coord_errors[errno]))
+
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,
               help='Variables to monitor')
@@ -996,25 +1006,7 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        last_values = [self.comm.get_variable(var)
-                       for var in args.variables]
-
-        for var, value in zip(args.variables, last_values):
-            print('%s = %s' % (var, value))
-
-        try:
-            while True:
-                values = [self.comm.get_variable(var)
-                          for var in args.variables]
-                for var, old_value, new_value in zip(args.variables,
-                                                     last_values, values):
-                    if old_value != new_value:
-                        print('%s = %s' % (var, new_value))
-
-                last_values = values
-
-        except KeyboardInterrupt:
-            pass
+        monitor_variables(args.variables)
 
     @magic_arguments()
     @argument('base', type=unicode,
@@ -1041,16 +1033,6 @@ class PpmacCore(Configurable):
         def get_variables(var):
             obj = self.completer.check(var)
             return ['%s.%s' % (var, attr) for attr in dir(obj)]
-
-        def get_values(vars_):
-            ret = []
-            for var in vars_:
-                try:
-                    ret.append(self.comm.get_variable(var))
-                except (GPError, TimeoutError) as ex:
-                    #print('Error', ex)
-                    ret.append('')
-            return ret
 
         variables = get_variables(args.base)
         for ignore in args.ignore:
@@ -1080,6 +1062,131 @@ class PpmacCore(Configurable):
                 for var in sorted(change_set):
                     print(var)
 
+    @magic_arguments()
+    @argument('motor', default=1, type=int,
+              help='Motor number')
+    @argument('additional', nargs='*', type=unicode,
+              help='Additional fields to check')
+    @argument('-i', '--ignore', nargs='*', type=unicode,
+              help='Fields to ignore')
+    @argument('-a', '--all', action='store_true',
+              help='Show all information')
+    @argument('-m', '--monitor', action='store_true',
+              help='Monitor continuously for changes')
+    def mstatus(self, magic_self, arg):
+        '''
+        Show motor status
+
+        Defaults to showing only abnormal values
+        '''
+        args = parse_argstring(self.mstatus, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        motor = 'Motor[%d]' % args.motor
+        variables = list(const.motor_status)
+        if args.ignore is not None:
+            for variable in args.ignore:
+                try:
+                    variables.remove(variable)
+                except:
+                    pass
+
+        if args.additional is not None:
+            variables.extend(args.additional)
+
+        variables = ['.'.join((motor, var)) for var in variables]
+        last_values = {}
+
+        def got_value(var, value):
+            var = var.split('.')[-1]
+            if args.all or var in args.additional:
+                ret = value
+            elif var in const.motor_normal:
+                last_value = last_values.get(var, None)
+
+                normal_value = const.motor_normal[var]
+                if int(value) == normal_value:
+                    if last_value is not None:
+                        ret = value
+                    else:
+                        ret = None
+                else:
+                    # Only include abnormal values
+                    ret = value
+
+            last_values[var] = ret
+            return ret
+
+        if args.monitor:
+            monitor_variables(variables, comm=self.comm, change_callback=got_value)
+        else:
+            print_var_values(self.comm, variables, cb=got_value)
+
+    @magic_arguments()
+    @argument('coord', default=1, type=int,
+              help='Coordinate system number')
+    @argument('additional', nargs='*', type=unicode,
+              help='Additional fields to check')
+    @argument('-i', '--ignore', nargs='*', type=unicode,
+              help='Fields to ignore')
+    @argument('-a', '--all', action='store_true',
+              help='Show all information')
+    @argument('-m', '--monitor', action='store_true',
+              help='Monitor continuously for changes')
+    def cstatus(self, magic_self, arg):
+        '''
+        Show coordinate system status
+
+        Defaults to showing only abnormal values
+        '''
+        args = parse_argstring(self.cstatus, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        coord = 'Coord[%d]' % args.coord
+        variables = list(const.coord_status)
+        if args.ignore is not None:
+            for variable in args.ignore:
+                try:
+                    variables.remove(variable)
+                except:
+                    pass
+
+        if args.additional is not None:
+            variables.extend(args.additional)
+
+        variables = ['.'.join((coord, var)) for var in variables]
+        last_values = {}
+
+        def got_value(var, value):
+            var = var.split('.')[-1]
+            if args.all or var in args.additional:
+                ret = value
+            elif var in const.coord_normal:
+                last_value = last_values.get(var, None)
+
+                normal_value = const.coord_normal[var]
+                if int(value) == normal_value:
+                    if last_value is not None:
+                        ret = value
+                    else:
+                        ret = None
+                else:
+                    # Only include abnormal values
+                    ret = value
+
+            last_values[var] = ret
+            return ret
+
+        if args.monitor:
+            monitor_variables(variables, comm=self.comm, change_callback=got_value)
+        else:
+            print_var_values(self.comm, variables, cb=got_value)
+
+
 @PpmacExport
 def create_util_makefile(source_files, output_name):
     make_path = os.path.join(MODULE_PATH, 'util_makefile')
@@ -1094,7 +1201,7 @@ def create_util_makefile(source_files, output_name):
 def build_utility(comm, source_files, output_name,
                   dest_path='/var/ftp/usrflash',
                   verbose=False, cleanup=True,
-                  run=None,
+                  run=None, timeout=0.0,
                   **kwargs):
 
     makefile_text = create_util_makefile(source_files, output_name)
@@ -1126,4 +1233,82 @@ def build_utility(comm, source_files, output_name,
     if not errored and run is not None:
         run = ' '.join(run)
         comm.shell_command('%s %s' % (output_name, run),
-                           verbose=True)
+                           timeout=None, verbose=True)
+
+
+def get_var_values(comm, vars_, cb=None):
+    ret = []
+    for var in vars_:
+        try:
+            value = comm.get_variable(var)
+        except (GPError, TimeoutError) as ex:
+            ret.append('Error: %s' % (ex, ))
+        else:
+            if cb is not None:
+                try:
+                    value = cb(var, value)
+                except:
+                    pass
+
+            ret.append(value)
+    return ret
+
+
+def print_var_values(comm, vars, cb=None, f=sys.stdout):
+    values = get_var_values(comm, vars, cb=cb)
+
+    for var, value in zip(vars, values):
+        if value is not None:
+            print('%s = %s' % (var, value), file=f)
+
+    return values
+
+
+@PpmacExport
+def monitor_variables(variables, f=sys.stdout, comm=None,
+                      change_callback=None, show_change_set=False,
+                      show_initial=True):
+    if comm is None:
+        comm = PpmacCore.instance
+        if comm is None:
+            raise ValueError('PpmacCore comm not connected')
+
+    change_set = set()
+    last_values = get_var_values(comm, variables, cb=change_callback)
+
+    if show_initial:
+        for var, value in zip(variables, last_values):
+            if value is not None:
+                print('%s = %s' % (var, value), file=f)
+
+    try:
+        while True:
+            values = get_var_values(comm, variables, cb=change_callback)
+            for var, old_value, new_value in zip(variables,
+                                                 last_values, values):
+                if new_value is None:
+                    continue
+
+                if old_value != new_value:
+                    print('%s = %s' % (var, new_value), file=f)
+                    change_set.add(var)
+
+            last_values = values
+
+    except KeyboardInterrupt:
+        if show_change_set and change_set:
+            print("Variables changed:", file=f)
+            for var in sorted(change_set):
+                print(var, file=f)
+
+@PpmacExport
+def print_variables(variables, f=sys.stdout, comm=None,
+                    value_callback=None):
+    if comm is None:
+        comm = PpmacCore.instance
+        if comm is None:
+            raise ValueError('PpmacCore comm not connected')
+
+    values = get_var_values(comm, variables, cb=value_callback)
+    for var, value in zip(variables, values):
+        print('%s = %s' % (var, value), file=f)
