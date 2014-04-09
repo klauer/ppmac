@@ -9,20 +9,28 @@ close all buffers
 open prog %(prog)d
     L10=0
 
-    dwell 1.0
+    dwell 500.0
     gather.enable=2
     linear
     inc
     TS0
-    TA1
     TA%(accel)f
     TS%(scurve)f
     F%(velocity)f
     while(L10 < %(iterations)d)
     {
-        X%(distance)f
-        dwell%(dwell)f
-        X-%(distance)f
+        X(%(distance)f)
+        dwell %(dwell)f
+        L10=L10+1
+    }
+
+    dwell %(dwell)f
+
+    L10=0
+    while(L10 < %(iterations)d)
+    {
+        X(-%(distance)f)
+        dwell %(dwell)f
         L10=L10+1
     }
     dwell0
