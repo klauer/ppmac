@@ -315,6 +315,30 @@ class PPComm(object):
 
         print('Done')
 
+    def program(self, coord_sys, program,
+                stop=None, start=None, line_label=None):
+        """
+        Start/stop a motion program in coordinate system(s)
+        """
+        if isinstance(coord_sys, (list, tuple)):
+            coord_sys = ','.join('%d' % c for c in coord_sys)
+        else:
+            coord_sys = '%d' % coord_sys
+
+        command = ['&%(coord_sys)s', 'begin%(program)d']
+
+        if line_label is not None:
+            command.append('.%(line_label)d')
+
+        if start:
+            command.append('r')
+        elif stop:
+            command.append('abort')
+
+        command = ''.join(command) % locals()
+        self.send_line(command)
+
+
 def main():
     comm = PPComm()
     comm.open_channel()
