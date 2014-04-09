@@ -608,17 +608,48 @@ class PpmacCore(Configurable):
     @argument('motor1', default=1, type=int,
               help='Motor number')
     @argument('distance', default=1.0, type=float,
-              help='Move distance (motor units)')
+              help='Move distance per step (motor units)')
     @argument('velocity', default=1.0, type=float,
               help='Velocity (motor units/s)')
-    @argument('reps', default=1, type=int, nargs='?',
-              help='Repetitions')
-    @argument('-k', '--no-kill', dest='kill_after', action='store_false',
-              help='Don\'t kill the motor after the move')
+    @argument('iterations', default=1, type=int, nargs='?',
+              help='Steps')
+    @argument('-k', '--kill', dest='kill_after', action='store_true',
+              help='Kill the motor after the move')
     @argument('-a', '--accel', default=1.0, type=float,
               help='Set acceleration time (mu/ms^2)')
     @argument('-d', '--dwell', default=1.0, type=float,
-              help='Dwell time after the move (ms)')
+              help='Dwell time (ms)')
+    @argument('-g', '--gather', type=unicode, nargs='*',
+              help='Gather additional addresses during move')
+    def pyramid(self, magic_args, arg):
+        """
+        Pyramid move, gather data and plot
+
+        NOTE: This uses a script located in `tune/ramp.txt` to perform the
+              motion.
+        """
+        args = parse_argstring(self.ramp, arg)
+
+        if not args:
+            return
+
+        self.custom_tune('pyramid.txt', args)
+
+    @magic_arguments()
+    @argument('motor1', default=1, type=int,
+              help='Motor number')
+    @argument('distance', default=1.0, type=float,
+              help='Move distance (motor units)')
+    @argument('velocity', default=1.0, type=float,
+              help='Velocity (motor units/s)')
+    @argument('iterations', default=1, type=int, nargs='?',
+              help='Repetitions')
+    @argument('-k', '--kill', dest='kill_after', action='store_true',
+              help='Kill the motor after the move')
+    @argument('-a', '--accel', default=1.0, type=float,
+              help='Set acceleration time (mu/ms^2)')
+    @argument('-d', '--dwell', default=1.0, type=float,
+              help='Dwell time (ms)')
     @argument('-g', '--gather', type=unicode, nargs='*',
               help='Gather additional addresses during move')
     def ramp(self, magic_args, arg):
@@ -644,14 +675,14 @@ class PpmacCore(Configurable):
               help='Move distance (motor units)')
     @argument('velocity', default=1.0, type=float,
               help='Velocity (motor units/s)')
-    @argument('reps', default=1, type=int, nargs='?',
+    @argument('iterations', default=1, type=int, nargs='?',
               help='Repetitions')
-    @argument('-k', '--no-kill', dest='kill_after', action='store_false',
-              help='Don\'t kill the motor after the move')
+    @argument('-k', '--kill', dest='kill_after', action='store_true',
+              help='Kill the motor after the move')
     @argument('-a', '--accel', default=1.0, type=float,
               help='Set acceleration time (mu/ms^2)')
     @argument('-d', '--dwell', default=1.0, type=float,
-              help='Dwell time after the move (ms)')
+              help='Dwell time (ms)')
     #@argument('-g', '--gather', type=unicode, nargs='*',
     #          help='Gather additional addresses during move')
     @argument('-v', '--variable', default='Kp', type=unicode,
@@ -691,8 +722,17 @@ class PpmacCore(Configurable):
             print('Must set either --values or --low/--high/--step')
             return
 
-        self.custom_tune(args.script, args,
-                         range_var=param, range_values=values)
+        best, rms = self.custom_tune(args.script, args,
+                                     range_var=param, range_values=values)
+
+        if len(values) == len(rms):
+            plt.plot(values, rms)
+            if best is not None:
+                plt.vlines(best, min(rms), max(rms))
+
+            plt.ylabel('RMS error')
+            plt.xlabel(param)
+            plt.show()
 
     def other_trajectory(move_type):
         @magic_arguments()
@@ -704,7 +744,7 @@ class PpmacCore(Configurable):
                   help='Velocity (motor units/s)')
         @argument('reps', default=1, type=int, nargs='?',
                   help='Repetitions')
-        @argument('-k', '--no-kill', dest='no_kill', action='store_true',
+        @argument('-k', '--kill', dest='no_kill', action='store_true',
                   help='Don\'t kill the motor after the move')
         @argument('-o', '--one-direction', dest='one_direction', action='store_true',
                   help='Move only in one direction')
@@ -947,7 +987,7 @@ class PpmacCore(Configurable):
 
         self.comm.open_gpascii()
         try:
-            self.comm.send_line('&%db%dr' % (args.coord, args.program))
+            self.comm.program(args.coord, args.program, start=True)
         except GPError as ex:
             print(ex)
             if 'READY TO RUN' in str(ex):
@@ -958,6 +998,7 @@ class PpmacCore(Configurable):
 
         print('Coord %d Program %d' % (args.coord, args.program))
         active_var = 'Coord[%d].ProgActive' % args.program
+
         def get_active():
             return self.comm.get_variable(active_var, type_=int)
 
@@ -984,7 +1025,7 @@ class PpmacCore(Configurable):
         except KeyboardInterrupt:
             if get_active():
                 print("Aborting...")
-                self.comm.send_line('&%db%da' % (args.coord, args.program))
+                self.comm.program(args.coord, args.program, stop=True)
 
         print('Done (%s = %s)' % (active_var, get_active()))
 
@@ -1039,7 +1080,7 @@ class PpmacCore(Configurable):
             if ignore in variables:
                 variables.remove(ignore)
 
-        last_values = get_values(variables)
+        last_values = get_var_values(self.comm, variables)
         for var, value in zip(variables, last_values):
             print('%s = %s' % (var, value))
 
@@ -1047,7 +1088,7 @@ class PpmacCore(Configurable):
 
         try:
             while True:
-                values = get_values(variables)
+                values = get_var_values(self.comm, variables)
                 for var, old_value, new_value in zip(variables,
                                                      last_values, values):
                     if old_value != new_value:
@@ -1269,7 +1310,7 @@ def monitor_variables(variables, f=sys.stdout, comm=None,
                       change_callback=None, show_change_set=False,
                       show_initial=True):
     if comm is None:
-        comm = PpmacCore.instance
+        comm = PpmacCore.instance.comm
         if comm is None:
             raise ValueError('PpmacCore comm not connected')
 
@@ -1301,11 +1342,12 @@ def monitor_variables(variables, f=sys.stdout, comm=None,
             for var in sorted(change_set):
                 print(var, file=f)
 
+
 @PpmacExport
 def print_variables(variables, f=sys.stdout, comm=None,
                     value_callback=None):
     if comm is None:
-        comm = PpmacCore.instance
+        comm = PpmacCore.instance.comm
         if comm is None:
             raise ValueError('PpmacCore comm not connected')
 

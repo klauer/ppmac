@@ -33,7 +33,7 @@ logger = logging.getLogger('ppmac_tune')
 
 def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
                 dwell=0.0, accel=1.0, scurve=0.0, prog=999, coord_sys=0,
-                gather=[], motor2=None, iterations=2, kill_after=True):
+                gather=[], motor2=None, iterations=2, kill_after=False):
 
     coords = comm.get_coords()
     gather_config_file = ppmac_gather.gather_config_file
@@ -57,6 +57,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     print('Script file is', script_file)
     script = open(script_file, 'rt').read()
     script = script % locals()
+    # print(script)
 
     settings = ppmac_gather.get_settings(gather_vars, period=1,
                                          samples=ppmac_gather.max_samples)
@@ -73,13 +74,15 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
         #print('->', line)
         comm.send_line(line)
 
+    comm.program(coord_sys, prog, start=True)
+
     def get_status():
         return comm.get_variable('gather.enable', type_=int)
 
     try:
         #time.sleep(1.0 + abs((iterations * distance) / velocity))
+        print("Waiting...")
         while get_status() == 0:
-            print("Waiting...")
             time.sleep(0.1)
 
         while get_status() == 2:
@@ -91,13 +94,12 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
         print('Done')
 
     except KeyboardInterrupt:
-        print('Cancelled - killing motors')
-        comm.kill_motors([motor1, motor2])
-    else:
+        print('Cancelled - stopping program')
+        comm.program(coord_sys, prog, stop=True)
+    finally:
         if kill_after:
             print('Killing motors')
             comm.kill_motors([motor1, motor2])
-    finally:
         print('Restoring coordinate systems...')
         comm.set_coords(coords, verbose=True)
 
@@ -111,6 +113,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     result_path = ppmac_gather.gather_output_file
     data = ppmac_gather.get_gather_results(comm, gather_vars, result_path)
     return gather_vars, data
+
 
 def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):
     """
@@ -212,6 +215,7 @@ SERVO_SETTINGS = ['Ctrl',
                   'Servo.Kd1',
                   ]
 
+
 def get_settings_variables(completer, index=0):
     settings = SERVO_SETTINGS
     if completer is not None:
@@ -227,11 +231,11 @@ def get_settings_variables(completer, index=0):
 
     return settings
 
+
 def get_settings(comm, motor, completer=None, settings=None):
     settings = get_settings_variables(completer)
 
     base = 'Motor[%d].' % motor
-    ret = {}
     for setting in sorted(settings):
         full_name = '%s%s' % (base, setting)
         value = comm.get_variable(full_name)
@@ -240,6 +244,7 @@ def get_settings(comm, motor, completer=None, settings=None):
             yield obj, value
         else:
             yield full_name, value
+
 
 def copy_settings(comm, motor_from, motor_to, settings=None, completer=None):
     if settings is None:
@@ -279,6 +284,7 @@ ramp = _other_traj(OT_RAMP)
 trapezoid = _other_traj(OT_TRAPEZOID)
 s_curve = _other_traj(OT_S_CURVE)
 
+
 def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, r_mask=0x1e, g_mask=0xffffffff):
     exe = '/opt/ppmac/geterrors/geterrors'
     args = '-t %(time_).1f -#%(motor)d -m0x%(m_mask)x -c0x%(c_mask)x -r0x%(r_mask)x -g0x%(g_mask)x' % locals()
@@ -286,6 +292,7 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
         args += ' -S"%(abort_cmd)s"'
 
     print(exe, args)
+
 
 def plot_custom(columns, data, left_indices=[], right_indices=[],
                 xlabel='Time (s)', left_label='',
@@ -326,6 +333,7 @@ def get_columns(all_columns, data, *to_get):
 
     indices = [all_columns.index(col) for col in to_get]
     return [data[:, idx] for idx in indices]
+
 
 def tune_range(comm, script_file, parameter, values, **kwargs):
     motor = kwargs['motor1']
@@ -368,6 +376,7 @@ def tune_range(comm, script_file, parameter, values, **kwargs):
         else:
             return None, rms_results
 
+
 def main():
     global servo_period
 
@@ -401,6 +410,7 @@ def main():
         plt.xlabel('Kp')
         plt.ylabel('RMS error')
         plt.show()
+
 
 if __name__ == '__main__':
     main()
