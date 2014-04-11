@@ -498,6 +498,10 @@ class PpmacCore(Configurable):
         desired_addr = 'motor[%d].despos.a' % args.motor
         actual_addr = 'motor[%d].actpos.a' % args.motor
 
+        if not addresses or not data:
+            print('No data gathered?')
+            return
+
         cols = tune.get_columns(addresses, data,
                                 'sys.servocount.a', desired_addr, actual_addr)
 
@@ -1034,6 +1038,7 @@ class PpmacCore(Configurable):
 
         if errno in const.coord_errors:
             print('Error: (%s) %s' % (const.coord_errors[errno]))
+
 
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,

@@ -13,7 +13,6 @@ from __future__ import print_function
 import os
 import functools
 import logging
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -34,9 +33,12 @@ logger = logging.getLogger('ppmac_tune')
 def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
                 dwell=0.0, accel=1.0, scurve=0.0, prog=999, coord_sys=0,
                 gather=[], motor2=None, iterations=2, kill_after=False):
+    """
+    Run a tuning script and return the gathered data
 
-    coords = comm.get_coords()
-    gather_config_file = ppmac_gather.gather_config_file
+    Returns: gathered_variables, data
+    """
+
     if motor2 is None:
         motor2 = motor1
 
@@ -59,60 +61,19 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     script = script % locals()
     # print(script)
 
-    settings = ppmac_gather.get_settings(gather_vars, period=1,
-                                         samples=ppmac_gather.max_samples)
-    if comm.send_file(gather_config_file, '\n'.join(settings)):
-        print('Wrote configuration to', gather_config_file)
-
-    comm.set_variable('gather.enable', '0')
-
-    comm.shell_command('gpascii -i%s' % gather_config_file)
-
-    comm.open_gpascii()
-
-    for line in script.split('\n'):
-        #print('->', line)
-        comm.send_line(line)
-
-    comm.program(coord_sys, prog, start=True)
-
-    def get_status():
-        return comm.get_variable('gather.enable', type_=int)
-
-    try:
-        #time.sleep(1.0 + abs((iterations * distance) / velocity))
-        print("Waiting...")
-        while get_status() == 0:
-            time.sleep(0.1)
-
-        while get_status() == 2:
-            samples = comm.get_variable('gather.samples', type_=int)
-            print("Working... got %6d data points" % samples, end='\r')
-            time.sleep(0.1)
-
-        print()
-        print('Done')
-
-    except KeyboardInterrupt:
-        print('Cancelled - stopping program')
-        comm.program(coord_sys, prog, stop=True)
-    finally:
-        if kill_after:
-            print('Killing motors')
-            comm.kill_motors([motor1, motor2])
-        print('Restoring coordinate systems...')
-        comm.set_coords(coords, verbose=True)
-
-    try:
-        for line in comm.read_timeout(timeout=0.1):
-            if 'error' in line:
-                print(line)
-    except pp_comm.TimeoutError:
+    def killed(ex):
         pass
 
-    result_path = ppmac_gather.gather_output_file
-    data = ppmac_gather.get_gather_results(comm, gather_vars, result_path)
-    return gather_vars, data
+    with pp_comm.CoordinateSave(comm):
+        try:
+            return ppmac_gather.run_and_gather(comm, script, prog=prog,
+                                               coord_sys=coord_sys,
+                                               gather_vars=gather_vars,
+                                               cancel_callback=killed)
+        finally:
+            if kill_after:
+                print('Killing motors')
+                comm.kill_motors([motor1, motor2])
 
 
 def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):
@@ -326,6 +287,9 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
 
 
 def get_columns(all_columns, data, *to_get):
+    if not data:
+        return [np.zeros(1) for col in to_get]
+
     to_get = [col.lower() for col in to_get]
     all_columns = [col.lower() for col in all_columns]
     if isinstance(data, list):

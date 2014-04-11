@@ -10,6 +10,7 @@ PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
 PPMAC_USER = os.environ.get('PPMAC_USER', 'root')
 PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
 
+
 class PPCommError(Exception): pass
 class CommandFailedError(PPCommError): pass
 class TimeoutError(PPCommError): pass
@@ -313,7 +314,8 @@ class PPComm(object):
 
                 self.send_line(send_)
 
-        print('Done')
+        if verbose:
+            print('Done')
 
     def program(self, coord_sys, program,
                 stop=None, start=None, line_label=None):
@@ -337,6 +339,22 @@ class PPComm(object):
 
         command = ''.join(command) % locals()
         self.send_line(command)
+
+
+class CoordinateSave(object):
+    """
+    Context manager that saves/restores the current coordinate
+    system setup
+    """
+    def __init__(self, comm, verbose=True):
+        self.comm = comm
+        self.verbose = verbose
+
+    def __enter__(self):
+        self.coords = self.comm.get_coords()
+
+    def __exit__(self, type_, value, traceback):
+        self.comm.set_coords(self.coords, verbose=self.verbose)
 
 
 def main():

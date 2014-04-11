@@ -19,6 +19,8 @@ import ast
 import matplotlib.pyplot as plt
 import numpy as np
 
+import pp_comm
+
 servo_period = 0.442673749446657994 * 1e-3  # default
 max_samples = 0x7FFFFFFF
 #max_samples = 5000
@@ -328,6 +330,81 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
     print(exe, args)
 
 
+def run_and_gather(comm, script_text, prog=999, coord_sys=0,
+                   gather_vars=[], period=1, samples=max_samples,
+                   cancel_callback=None, check_active=False):
+    """
+    Run a motion program and read back the gathered data
+    """
+
+    if 'gather.enable' not in script_text.lower():
+        script_text = '\n'.join(['gather.enable=2',
+                                 script_text,
+                                 'gather.enable=0'
+                                 ])
+
+    comm.set_variable('gather.enable', '0')
+
+    gather_lower = [var.lower() for var in gather_vars]
+
+    if 'sys.servocount.a' not in gather_lower:
+        gather_vars = list(gather_vars)
+        gather_vars.insert(0, 'Sys.ServoCount.a')
+
+    settings = get_settings(gather_vars, period=period,
+                            samples=samples)
+    if comm.send_file(gather_config_file, '\n'.join(settings)):
+        print('Wrote configuration to', gather_config_file)
+
+    comm.shell_command('gpascii -i%s' % gather_config_file)
+
+    comm.open_gpascii()
+
+    for line in script_text.split('\n'):
+        comm.send_line(line)
+
+    comm.program(coord_sys, prog, start=True)
+
+    if check_active:
+        active_var = 'Coord[%d].ProgActive' % prog
+    else:
+        active_var = 'gather.enable'
+
+    def get_status():
+        return comm.get_variable(active_var, type_=int)
+
+    try:
+        #time.sleep(1.0 + abs((iterations * distance) / velocity))
+        print("Waiting...")
+        while get_status() == 0:
+            time.sleep(0.1)
+
+        while get_status() != 0:
+            samples = comm.get_variable('gather.samples', type_=int)
+            print("Working... got %6d data points" % samples, end='\r')
+            time.sleep(0.1)
+
+        print()
+        print('Done')
+
+    except KeyboardInterrupt as ex:
+        print()
+        print('Cancelled - stopping program')
+        comm.program(coord_sys, prog, stop=True)
+        if cancel_callback is not None:
+            cancel_callback(ex)
+
+    try:
+        for line in comm.read_timeout(timeout=0.1):
+            if 'error' in line:
+                print(line)
+    except pp_comm.TimeoutError:
+        pass
+
+    data = get_gather_results(comm, gather_vars, gather_output_file)
+    return gather_vars, data
+
+
 def main():
     global servo_period
 
@@ -352,30 +429,6 @@ def main():
     else:
         gather_and_plot(comm, addr, duration=duration, period=period)
 
+
 if __name__ == '__main__':
     main()
-
-# write /var/ftp/gather/GatherSetting.txt
-#  gather.enable=0
-#  gather.addr[0]=Sys.ServoCount.a
-#  gather.addr[1]=motor[3].pos.a
-#  gather.addr[2]=motor[4].pos.a
-#  gather.addr[3]=motor[5].pos.a
-#  gather.addr[4]=Acc24E3[0].Chan[1].Dac[0].a
-#  gather.addr[5]=Acc24E3[1].Chan[0].ServoCapt.a
-#  gather.addr[6]=Sys.Idata[100].a
-#  gather.addr[7]=Sys.Idata[12].a
-#  gather.addr[8]=enctable[3].index2.a
-#  gather.addr[9]=sys.idata[99].a
-#  gather.items=10
-#  gather.Period=10
-#  gather.enable=1
-#  gather.enable=0
-#  gather.MaxSamples=27623
-#
-# gpascii -i/var/ftp/gather/GatherSetting.txt
-# set gather.enable=2
-# ... poll gather.samples, gather.enable
-# gather.enable=0
-# gather /var/ftp/gather/GatherFile.txt -u (-u means upload)
-# results in GatherFile.txt

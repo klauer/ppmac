@@ -15,6 +15,7 @@ import math
 
 from IPython.core.magic_arguments import argument as MagicArgument
 
+
 class PpmacExported(object):
     """IPython Ppmac plugin exported function"""
     pass
@@ -106,7 +107,7 @@ def export_class_magic(ipython, instance):
     decorators will be exported to the user in IPython.
 
     :param ipython: the IPython shell instance
-    :param instance: the class instance to look check via introspection
+    :param instance: the class instance to check using introspection
     """
     def wrap(fcn):
         @functools.wraps(fcn)
@@ -133,6 +134,6 @@ def tracking_filter(cutoff_freq, damping_ratio=0.7, servo_period=0.4426737494466
         index1 = 255
 
     Tf = (256 / (256 - index2)) - 1
+    print('Kp %g Ki %g' % (Kp, Ki))
     print('Time constant: %d servo cycles' % Tf)
     return index1, index2
-
