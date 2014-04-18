@@ -452,9 +452,19 @@ class PPComm(object):
 
         if verbose:
             ret = []
+            remove_matching = PPMAC_MESSAGES
             for line in stdout.readlines():
-                print(line.rstrip())
-                ret.append(line)
+                skip = False
+                for regex in remove_matching:
+                    m = regex.match(line)
+                    if m is not None:
+                        skip = True
+                        break
+
+                if not skip:
+                    print(line.rstrip())
+                    ret.append(line)
+
             return ret
 
         else:
@@ -499,8 +509,7 @@ class PPComm(object):
         """
 
         try:
-            with self.sftp.file(remote, 'rb') as f:
-                pass
+            self.sftp.file(remote, 'rb')
         except:
             return False
         else:
@@ -556,8 +565,14 @@ def main():
     tmp_file = '/tmp/blah'
 
     comm.write_file(tmp_file, ''.join(passwd))
+
+    assert(comm.file_exists(tmp_file))
+
     read_ = comm.read_file(tmp_file)
     assert(passwd == read_)
+
+    assert(comm.file_exists('/etc/passwd'))
+    assert(not comm.file_exists('/asdlfkja'))
 
 if __name__ == '__main__':
     main()

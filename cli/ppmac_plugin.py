@@ -37,6 +37,7 @@ import ppmac_const as const
 logger = logging.getLogger('PpmacCore')
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
+UTIL_PATH = '/var/ftp/usrflash'
 
 # Extension Initialization #
 def load_ipython_extension(ipython):
@@ -959,7 +960,7 @@ class PpmacCore(Configurable):
     @magic_arguments()
     @argument('remote_module', type=unicode,
               help='Kernel module remote filename')
-    @argument('name', type=unicode,
+    @argument('phase_function', type=unicode,
               help='Phase function name')
     @argument('motors', type=int, nargs='+',
               help='Motor number(s)')
@@ -984,25 +985,48 @@ class PpmacCore(Configurable):
             return
 
         if args.unload:
+            print('- Unloading the kernel module')
             self.comm.shell_command('rmmod %s' % args.remote_module, verbose=True)
 
         if args.upload:
+            print('- Uploading the kernel module (%s)' % args.upload)
             self.comm.send_file(args.upload, args.remote_module)
 
         def set_phase(value):
             """
             Enable/disable phase control for all motors
             """
+            print()
+            if value:
+                print('- Enabling the motor phase control')
+            else:
+                print('- Disabling the motor phase control')
             for motor in args.motors:
-                self.set_variable('Motor[%d].PhaseCtrl' % motor, value)
+                self.set_verbose('Motor[%d].PhaseCtrl' % motor, value)
 
         set_phase(0)
 
+        print()
+        print('- Inserting the kernel module')
         self.comm.shell_command('insmod %s' % args.remote_module, verbose=True)
-        self.comm.shell_command('lsmod |grep %s' % args.remote_module, verbose=True)
 
+        mod_fn = os.path.split(args.remote_module)[-1]
+        grep_text = os.path.splitext(mod_fn)[0]
+        self.comm.shell_command('lsmod |grep %s' % grep_text,
+                                verbose=True)
+
+        prog_path = os.path.join(UTIL_PATH, 'userphase')
+
+        if not self.comm.file_exists(prog_path):
+            print('Building userphase utility (from userphase_util.c)')
+            build_utility(self.comm, ['userphase_util.c'], 'userphase',
+                          dest_path=UTIL_PATH)
+            print('Done.')
+
+        print()
+        print('- Setting the phase function for each motor')
         for motor in args.motors:
-            self.comm.shell_command('/var/ftp/usrflash/userphase -l %d %s' % (motor, args.name),
+            self.comm.shell_command('%s -l %d %s' % (prog_path, motor, args.phase_function),
                                     verbose=True)
 
         set_phase(1)
@@ -1322,24 +1346,25 @@ def create_util_makefile(source_files, output_name):
 
 @PpmacExport
 def build_utility(comm, source_files, output_name,
-                  dest_path='/var/ftp/usrflash',
+                  dest_path=UTIL_PATH,
                   verbose=False, cleanup=True,
                   run=None, timeout=0.0,
                   **kwargs):
 
     makefile_text = create_util_makefile(source_files, output_name)
 
-    comm.write_file(os.path.join(dest_path, 'Makefile'), local_file=makefile_text)
-    print('Sending Makefile')
+    comm.write_file(os.path.join(dest_path, 'Makefile'), makefile_text)
+    if verbose:
+        print('Sending Makefile')
+
     for fn in source_files:
-        text = open(fn, 'r').read()
         dest_fn = os.path.join(dest_path, os.path.split(fn)[-1])
         print('Sending', dest_fn)
-        comm.send_file(dest_fn, text)
+        comm.send_file(fn, dest_fn)
 
-    comm.send_line('cd %s' % dest_path)
-    print('Building...')
-    lines = comm.shell_command('make', verbose=verbose,
+    if verbose:
+        print('Building...')
+    lines = comm.shell_command('make -C "%s"' % dest_path, verbose=verbose,
                                **kwargs)
 
     if cleanup:
