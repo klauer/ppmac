@@ -126,9 +126,14 @@ class PpmacCore(Configurable):
     def open_completer_db(self):
         db_file = self.completer_db_file
         c = None
+        if self.comm is not None:
+            gpascii = self.comm.gpascii_channel()
+        else:
+            gpascii = None
+
         if os.path.exists(db_file):
             try:
-                c = completer.start_completer_from_db(db_file, ppmac=self.comm)
+                c = completer.start_completer_from_db(db_file, gpascii=gpascii)
             except Exception as ex:
                 print('Unable to load current db file: %s (%s) %s' %
                       (db_file, ex.__class__.__name__, ex))
@@ -141,7 +146,8 @@ class PpmacCore(Configurable):
 
             windows_ip = self.ide_host
             ppmac_ip = self.host
-            c = completer.start_completer_from_mysql(windows_ip, ppmac_ip, db_file=db_file)
+            c = completer.start_completer_from_mysql(windows_ip, ppmac_ip, db_file=db_file,
+                                                     gpascii=gpascii)
 
         if c is not None:
             self.completer = c
@@ -177,12 +183,8 @@ class PpmacCore(Configurable):
         if password is None:
             password = self.password
 
-        if self.comm is not None:
-            self.comm.close()
-
         self.comm = PPComm(host=host, port=port,
                            user=user, password=password)
-        self.comm.open_channel()
 
         if self.use_completer_db:
             self.completer = None
@@ -214,11 +216,11 @@ class PpmacCore(Configurable):
         if not args:
             return
 
-        self.comm.open_gpascii()
+        gpascii = self.comm.gpascii_channel()
         line = ' '.join(args.cmd)
-        self.comm.send_line(line)
+        gpascii.send_line(line)
         try:
-            for line in self.comm.read_timeout(timeout=args.timeout):
+            for line in gpascii.read_timeout(timeout=args.timeout):
                 if line:
                     print(line)
 
@@ -239,7 +241,7 @@ class PpmacCore(Configurable):
             return
 
         try:
-            print('%s=%s' % (args.variable, self.comm.get_variable(args.variable)))
+            print('%s=%s' % (args.variable, self.comm.gpascii.get_variable(args.variable)))
         except GPError as ex:
             print(ex)
 
@@ -256,7 +258,7 @@ class PpmacCore(Configurable):
             return
 
         try:
-            set_result = self.comm.set_variable(args.variable, args.value)
+            set_result = self.comm.gpascii.set_variable(args.variable, args.value)
             print('%s=%s' % (args.variable, set_result))
         except GPError as ex:
             print(ex)
@@ -282,24 +284,23 @@ class PpmacCore(Configurable):
 
         try:
             if value is None:
-                print('%s=%s' % (var,
-                                 self.comm.get_variable(var)))
+                print('%s=%s' % (var, self.comm.gpascii.get_variable(var)))
             else:
-                print('%s=%s' % (var,
-                                 self.comm.set_variable(var, value)))
+                print('%s=%s' % (var, self.comm.gpascii.set_variable(var, value)))
         except GPError as ex:
             print(ex)
 
     @PpmacExport
-    def shell_cmd(self, line):
+    def shell_cmd(self, command):
         """
         Send a shell command (e.g., ls)
         """
 
-        if not line or not self.check_comm():
+        if not command or not self.check_comm():
             return
 
-        self.comm.shell_command(line, verbose=True)
+        for line in self.comm.shell_command(command):
+            print(line.rstrip())
 
     @magic_arguments()
     @argument('first_motor', default=1, nargs='?', type=int,
@@ -320,7 +321,7 @@ class PpmacCore(Configurable):
 
         def get_values(var, type_=float):
             var = 'Motor[%%d].%s' % var
-            return [self.comm.get_variable(var % i, type_=type_)
+            return [self.comm.gpascii.get_variable(var % i, type_=type_)
                     for i in range_]
 
         act_pos = get_values('ActPos')
@@ -335,7 +336,7 @@ class PpmacCore(Configurable):
         if not self.check_comm():
             return self.default_servo_period
 
-        return self.comm.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
+        return self.comm.gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
 
     @magic_arguments()
     @argument('duration', default=1.0, type=float,
@@ -374,7 +375,8 @@ class PpmacCore(Configurable):
             print('Reading gather settings...')
         settings = gather.read_settings_file(self.comm, settings_file)
         if 'gather.addr' not in settings:
-            raise KeyError('gather.addr: Unable to read addresses from settings file')
+            print('settings is', settings)
+            raise KeyError('gather.addr: Unable to read addresses from settings file (%s)' % settings_file)
 
         if verbose:
             #print('Settings are: %s' % settings)
@@ -445,8 +447,9 @@ class PpmacCore(Configurable):
         kwargs = dict((name, getattr(magic_args, name)) for name in args
                       if hasattr(magic_args, name))
 
+        gpascii = self.comm.gpascii_channel()
         if range_var is not None:
-            return tune.tune_range(self.comm, fn, range_var, range_values,
+            return tune.tune_range(gpascii, fn, range_var, range_values,
                                    **kwargs)
         else:
             return tune.custom_tune(self.comm, fn, **kwargs)
@@ -498,7 +501,7 @@ class PpmacCore(Configurable):
         desired_addr = 'motor[%d].despos.a' % args.motor
         actual_addr = 'motor[%d].actpos.a' % args.motor
 
-        if not addresses or not data:
+        if not addresses or data is None or len(data) == 0:
             print('No data gathered?')
             return
 
@@ -567,7 +570,11 @@ class PpmacCore(Configurable):
             try:
                 return int(addr)
             except:
-                return addresses.index(addr)
+                addr_a = '%s.a' % addr
+                if addr_a in addresses:
+                    return addresses.index(addr_a)
+                else:
+                    return addresses.index(addr)
 
         try:
             x_index = fix_index(args.x_axis)
@@ -604,8 +611,8 @@ class PpmacCore(Configurable):
         tune.plot_custom(addresses, data, x_index=x_index,
                          left_indices=left_indices,
                          right_indices=right_indices,
-                         left_label=str(args.left),
-                         right_label=str(args.right))
+                         left_label=', '.join('%s' % arg for arg in args.left),
+                         right_label=', '.join('%s' % arg for arg in args.right))
         plt.show()
 
     @magic_arguments()
@@ -795,7 +802,7 @@ class PpmacCore(Configurable):
             return
 
         search_text = ' '.join(args.text).lower()
-        for obj, value in tune.get_settings(self.comm, args.motor,
+        for obj, value in tune.get_settings(self.comm.gpascii, args.motor,
                                             completer=self.completer):
             if isinstance(obj, completer.PPCompleterNode):
                 try:
@@ -831,7 +838,7 @@ class PpmacCore(Configurable):
             logger.error('Destination motor should be different from source motor')
             return
 
-        tune.copy_settings(self.comm, args.motor_from, args.motor_to,
+        tune.copy_settings(self.comm.gpascii, args.motor_from, args.motor_to,
                            completer=self.completer)
 
     @magic_arguments()
@@ -859,6 +866,7 @@ class PpmacCore(Configurable):
         obj = self.completer.check(args.variable)
         items = obj.search(args.text)
 
+        # TODO print in a table
         def fix_row(row):
             return ' | '.join([str(item) for item in row
                               if item not in (u'NULL', None)])
@@ -904,8 +912,11 @@ class PpmacCore(Configurable):
             self.set_verbose(var, value)
 
     def set_verbose(self, var, value):
-        self.comm.set_variable(var, value)
-        print('%s = %s' % (var, self.comm.get_variable(var)))
+        """
+        Set and then get the gpascii variable
+        """
+        self.comm.gpascii.set_variable(var, value)
+        print('%s = %s' % (var, self.comm.gpascii.get_variable(var)))
 
     @magic_arguments()
     @argument('-d', '--disable', default=False, action='store_true',
@@ -964,7 +975,7 @@ class PpmacCore(Configurable):
             self.comm.shell_command('rmmod %s' % args.module, verbose=True)
 
         for motor in args.motors:
-            self.comm.set_variable('Motor[%d].PhaseCtrl' % motor, 0)
+            self.set_variable('Motor[%d].PhaseCtrl' % motor, 0)
 
         self.comm.shell_command('insmod %s' % args.module, verbose=True)
         self.comm.shell_command('lsmod |grep %s' % args.module, verbose=True)
@@ -974,7 +985,7 @@ class PpmacCore(Configurable):
                                     verbose=True)
 
         for motor in args.motors:
-            self.comm.set_variable('Motor[%d].PhaseCtrl' % motor, 1)
+            self.comm.gpascii.set_variable('Motor[%d].PhaseCtrl' % motor, 1)
 
     @magic_arguments()
     @argument('coord', type=int,
@@ -989,9 +1000,9 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        self.comm.open_gpascii()
+        gpascii = self.comm.gpascii_channel()
         try:
-            self.comm.program(args.coord, args.program, start=True)
+            gpascii.program(args.coord, args.program, start=True)
         except GPError as ex:
             print(ex)
             if 'READY TO RUN' in str(ex):
@@ -1004,9 +1015,9 @@ class PpmacCore(Configurable):
         active_var = 'Coord[%d].ProgActive' % args.program
 
         def get_active():
-            return self.comm.get_variable(active_var, type_=int)
+            return gpascii.get_variable(active_var, type_=int)
 
-        last_values = [self.comm.get_variable(var)
+        last_values = [gpascii.get_variable(var)
                        for var in args.variables]
 
         for var, value in zip(args.variables, last_values):
@@ -1017,7 +1028,7 @@ class PpmacCore(Configurable):
                 if not args.variables:
                     time.sleep(0.1)
                 else:
-                    values = [self.comm.get_variable(var)
+                    values = [gpascii.get_variable(var)
                               for var in args.variables]
                     for var, old_value, new_value in zip(args.variables,
                                                          last_values, values):
@@ -1029,16 +1040,46 @@ class PpmacCore(Configurable):
         except KeyboardInterrupt:
             if get_active():
                 print("Aborting...")
-                self.comm.program(args.coord, args.program, stop=True)
+                gpascii.program(args.coord, args.program, stop=True)
 
         print('Done (%s = %s)' % (active_var, get_active()))
 
         error_status = 'Coord[%d].ErrorStatus' % args.coord
-        errno = self.comm.get_variable(error_status, type_=int)
+        errno = gpascii.get_variable(error_status, type_=int)
 
         if errno in const.coord_errors:
             print('Error: (%s) %s' % (const.coord_errors[errno]))
 
+    @magic_arguments()
+    @argument('script', type=str,
+              help='Motion program filename')
+    @argument('motors', nargs='*', type=unicode,
+              help='In the form X=1')
+    @argument('-c', '--coord', type=int, default=0,
+              help='Coordinate system')
+    @argument('-p', '--program', type=int, default=999,
+              help='Program number')
+    @argument('-r', '--run', action='store_true',
+              help='Run the uploaded program')
+    @argument('-g', '--gather', action='store_true',
+              help='Use gather')
+    def prog_send(self, magic_self, arg):
+        """
+        Send and optionally run a motion program.
+
+        If gather mode is enabled, the program will be run and the gather
+        data will be read.
+
+        Motors are in the form of
+                (coordinate system axis)=(motor number)
+        If any motors are specified, the coordinate system will be cleared
+        first and reassigned.
+
+        """
+        args = parse_argstring(self.prog_send, arg)
+
+        if not args or not self.check_comm():
+            return
 
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,
@@ -1085,9 +1126,13 @@ class PpmacCore(Configurable):
             if ignore in variables:
                 variables.remove(ignore)
 
+        print('Initial values:')
         last_values = get_var_values(self.comm, variables)
         for var, value in zip(variables, last_values):
             print('%s = %s' % (var, value))
+
+        print()
+        print('-')
 
         change_set = set()
 
@@ -1097,6 +1142,9 @@ class PpmacCore(Configurable):
                 for var, old_value, new_value in zip(variables,
                                                      last_values, values):
                     if old_value != new_value:
+                        if new_value.startswith('Error:'):
+                            continue
+
                         print('%s = %s' % (var, new_value))
                         change_set.add(var)
 
@@ -1123,7 +1171,8 @@ class PpmacCore(Configurable):
         '''
         Show motor status
 
-        Defaults to showing only abnormal values
+        Defaults to showing only possible error/warning values
+        (that is, those that differ from ppmac_const.motor_normal)
         '''
         args = parse_argstring(self.mstatus, arg)
 
@@ -1185,7 +1234,8 @@ class PpmacCore(Configurable):
         '''
         Show coordinate system status
 
-        Defaults to showing only abnormal values
+        Defaults to showing only possible error/warning values
+        (that is, those that differ from ppmac_const.coord_normal)
         '''
         args = parse_argstring(self.cstatus, arg)
 
@@ -1286,7 +1336,7 @@ def get_var_values(comm, vars_, cb=None):
     ret = []
     for var in vars_:
         try:
-            value = comm.get_variable(var)
+            value = comm.gpascii.get_variable(var)
         except (GPError, TimeoutError) as ex:
             ret.append('Error: %s' % (ex, ))
         else:

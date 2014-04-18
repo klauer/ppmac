@@ -64,7 +64,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     def killed(ex):
         pass
 
-    with pp_comm.CoordinateSave(comm):
+    with pp_comm.CoordinateSave(comm, verbose=False):
         try:
             return ppmac_gather.run_and_gather(comm, script, prog=prog,
                                                coord_sys=coord_sys,
@@ -73,7 +73,7 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
         finally:
             if kill_after:
                 print('Killing motors')
-                comm.kill_motors([motor1, motor2])
+                comm.gpascii.kill_motors([motor1, motor2])
 
 
 def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):
@@ -137,12 +137,16 @@ def plot_tune_results(columns, data,
     plt.show()
 
 
-def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt'):
-    comm.close_gpascii()
-    print('Running tune', cmd)
-    comm.send_line(cmd)
-    lines, groups = comm.wait_for('^(.*)\s+finished Successfully!$', verbose=True, timeout=50)
-    print('Tune finished (%s)' % groups[0])
+def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt',
+                     timeout=50):
+    print('Running tune: %s' % cmd)
+    for line, m in comm.shell_output(cmd, timeout=timeout,
+                                     wait_match='^(.*)\s+finished Successfully!$'):
+        if m is not None:
+            print('Tune finished: %s' % m.groups()[0])
+            break
+        else:
+            print(line)
 
     columns = ['Sys.ServoCount.a',
                'Desired',
@@ -178,7 +182,11 @@ SERVO_SETTINGS = ['Ctrl',
 
 
 def get_settings_variables(completer, index=0):
+    # Basic default settings
     settings = SERVO_SETTINGS
+
+    # But if the completer is available, grab all servo settings through
+    # introspection
     if completer is not None:
         try:
             motors = getattr(completer, 'Motor')
@@ -193,13 +201,13 @@ def get_settings_variables(completer, index=0):
     return settings
 
 
-def get_settings(comm, motor, completer=None, settings=None):
+def get_settings(gpascii, motor, completer=None, settings=None):
     settings = get_settings_variables(completer)
 
     base = 'Motor[%d].' % motor
     for setting in sorted(settings):
         full_name = '%s%s' % (base, setting)
-        value = comm.get_variable(full_name)
+        value = gpascii.get_variable(full_name)
         if completer is not None:
             obj = completer.check(full_name)
             yield obj, value
@@ -207,7 +215,7 @@ def get_settings(comm, motor, completer=None, settings=None):
             yield full_name, value
 
 
-def copy_settings(comm, motor_from, motor_to, settings=None, completer=None):
+def copy_settings(gpascii, motor_from, motor_to, settings=None, completer=None):
     if settings is None:
         settings = get_settings_variables(completer)
 
@@ -215,10 +223,10 @@ def copy_settings(comm, motor_from, motor_to, settings=None, completer=None):
         from_ = 'Motor[%d].%s' % (motor_from, setting)
         to_ = 'Motor[%d].%s' % (motor_to, setting)
 
-        old_value = comm.get_variable(to_)
-        new_value = comm.get_variable(from_)
+        old_value = gpascii.get_variable(to_)
+        new_value = gpascii.get_variable(from_)
         if old_value != new_value:
-            comm.set_variable(to_, new_value)
+            gpascii.set_variable(to_, new_value)
             print('Set %s to %s (was: %s)' % (to_, new_value, old_value))
 
 BIN_PATH = '/opt/ppmac'
@@ -287,7 +295,7 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
 
 
 def get_columns(all_columns, data, *to_get):
-    if not data:
+    if data is None or len(data) == 0:
         return [np.zeros(1) for col in to_get]
 
     to_get = [col.lower() for col in to_get]
@@ -299,7 +307,7 @@ def get_columns(all_columns, data, *to_get):
     return [data[:, idx] for idx in indices]
 
 
-def tune_range(comm, script_file, parameter, values, **kwargs):
+def tune_range(gpascii, script_file, parameter, values, **kwargs):
     motor = kwargs['motor1']
     if '.' not in parameter:
         parameter = 'Motor[%d].Servo.%s' % (int(motor), parameter)
@@ -316,13 +324,13 @@ def tune_range(comm, script_file, parameter, values, **kwargs):
 
     rms_results = []
     try:
-        start_value = comm.get_variable(parameter)
+        start_value = gpascii.get_variable(parameter)
         for i, value in enumerate(values):
             print('%d) Setting %s=%s' % (i + 1, parameter, value))
-            comm.set_variable(parameter, value)
-            print('%s = %s' % (parameter, comm.get_variable(parameter)))
+            gpascii.set_variable(parameter, value)
+            print('%s = %s' % (parameter, gpascii.get_variable(parameter)))
 
-            addrs, data = custom_tune(comm, script_file, **kwargs)
+            addrs, data = custom_tune(gpascii._comm, script_file, **kwargs)
             data = np.array(data)
 
             rms_ = calc_rms(addrs, data)
@@ -331,8 +339,8 @@ def tune_range(comm, script_file, parameter, values, **kwargs):
     except KeyboardInterrupt:
         pass
     finally:
-        comm.set_variable(parameter, start_value)
-        print('Resetting parameter %s = %s' % (parameter, comm.get_variable(parameter)))
+        gpascii.set_variable(parameter, start_value)
+        print('Resetting parameter %s = %s' % (parameter, gpascii.get_variable(parameter)))
         if rms_results:
             i = np.argmin(rms_results)
             print('Best %s = %s (error %s)' % (parameter, values[i], rms_results[i]))
@@ -345,15 +353,10 @@ def main():
     global servo_period
 
     comm = pp_comm.PPComm()
-    comm.open_channel()
-    servo_period = comm.servo_period
-    print('servo period is', servo_period)
+    servo_period = comm.gpascii.servo_period
+    print('Servo period is', servo_period)
 
-    if 0:
-        ramp_cmd = ramp(3, distance=0.01, velocity=0.01)
-        columns, data = run_tune_program(comm, ramp_cmd)
-        plot_tune_results(columns, data)
-    elif 0:
+    if 1:
         labels, data = custom_tune(comm, 'tune/ramp.txt', 3, 0.01, 0.01, iterations=3,
                                    gather=['Acc24E3[1].Chan[0].ServoCapt.a'])
 
@@ -367,7 +370,7 @@ def main():
         plt.show()
     else:
         values = np.arange(20, 55, 0.1)
-        best, rms = tune_range(comm, 'tune/ramp.txt', 'Kp', values,
+        best, rms = tune_range(comm.gpascii, 'tune/ramp.txt', 'Kp', values,
                                motor1=3, distance=0.01, velocity=0.01, iterations=3)
 
         plt.plot(values[:len(rms)], rms)

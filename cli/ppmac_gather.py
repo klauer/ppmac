@@ -123,8 +123,6 @@ def parse_gather(addresses, lines):
 
 
 def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_file):
-    comm.close_gpascii()
-
     total_samples = get_sample_count(period, duration)
 
     settings = get_settings(addresses, duration=duration, period=period)
@@ -132,26 +130,26 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
     if comm.send_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
-    comm.shell_command('gpascii -i%s' % gather_config_file)
+    comm.gpascii_file(gather_config_file)
 
-    max_lines = comm.get_variable('gather.maxlines', type_=int)
+    gpascii = comm.gpascii_channel()
+    max_lines = gpascii.get_variable('gather.maxlines', type_=int)
     if max_lines < total_samples:
         total_samples = max_lines
         duration = get_duration(period, total_samples)
-        comm.set_variable('gather.maxsamples', total_samples)
+        gpascii.set_variable('gather.maxsamples', total_samples)
 
         print('* Warning: Buffer not large enough.')
         print('  Maximum count with the current addresses: %d' % (max_lines, ))
         print('  New duration is: %.2f s' % (duration, ))
 
-    comm.open_gpascii()
-    comm.set_variable('gather.enable', 2)
+    gpascii.set_variable('gather.enable', 2)
     samples = 0
 
     print('Waiting for %d samples' % total_samples)
     try:
         while samples < total_samples:
-            samples = comm.get_variable('gather.samples', type_=int)
+            samples = gpascii.get_variable('gather.samples', type_=int)
             if total_samples != 0:
                 percent = 100. * (float(samples) / total_samples)
                 print('%-6d/%-6d (%.2f%%)' % (samples, total_samples,
@@ -164,16 +162,18 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
     finally:
         print()
 
-    comm.set_variable('gather.enable', 0)
-    comm.close_gpascii()
+    gpascii.set_variable('gather.enable', 0)
+    gpascii.close()
     return get_gather_results(comm, addresses, output_file)
 
 
 def get_gather_results(comm, addresses, output_file=gather_output_file):
     # -u is for upload
     comm.shell_command('gather %s -u' % (output_file, ))
-    return parse_gather(addresses,
-                        comm.read_file(output_file, timeout=60.0))
+
+    data = comm.read_file(output_file, timeout=60.0)
+    data = [line.strip() for line in data]
+    return parse_gather(addresses, data)
 
 
 def gather_data_to_file(fn, addr, data, delim='\t'):
@@ -207,7 +207,7 @@ def plot(addr, data):
 
 
 def gather_and_plot(comm, addr, duration=0.2, period=1):
-    servo_period = comm.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
+    servo_period = comm.gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
     print('Servo period is', servo_period)
 
     data = gather(comm, addr, duration=duration, period=period)
@@ -278,11 +278,16 @@ def plot_tune_results(columns, data,
     plt.show()
 
 
-def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt'):
+def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt',
+                     timeout=50):
     print('Running tune', cmd)
-    comm.shell_command(cmd)
-    lines, groups = comm.wait_for('^(.*)\s+finished Successfully!$', verbose=True, timeout=50)
-    print('Tune finished (%s)' % groups[0])
+    for line, m in comm.shell_output(cmd, timeout=timeout,
+                                     wait_match='^(.*)\s+finished Successfully!$'):
+        if m is not None:
+            print('Finished: %s' % m.groups()[0])
+            break
+        else:
+            print(line)
 
     columns = ['Sys.ServoCount.a',
                'Desired',
@@ -343,7 +348,8 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
                                  'gather.enable=0'
                                  ])
 
-    comm.set_variable('gather.enable', '0')
+    gpascii = comm.gpascii_channel()
+    gpascii.set_variable('gather.enable', '0')
 
     gather_lower = [var.lower() for var in gather_vars]
 
@@ -356,14 +362,12 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
     if comm.send_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
-    comm.shell_command('gpascii -i%s' % gather_config_file)
-
-    comm.open_gpascii()
+    comm.gpascii_file(gather_config_file)
 
     for line in script_text.split('\n'):
-        comm.send_line(line)
+        gpascii.send_line(line)
 
-    comm.program(coord_sys, prog, start=True)
+    gpascii.program(coord_sys, prog, start=True)
 
     if check_active:
         active_var = 'Coord[%d].ProgActive' % prog
@@ -371,7 +375,7 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
         active_var = 'gather.enable'
 
     def get_status():
-        return comm.get_variable(active_var, type_=int)
+        return gpascii.get_variable(active_var, type_=int)
 
     try:
         #time.sleep(1.0 + abs((iterations * distance) / velocity))
@@ -380,7 +384,7 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
             time.sleep(0.1)
 
         while get_status() != 0:
-            samples = comm.get_variable('gather.samples', type_=int)
+            samples = gpascii.get_variable('gather.samples', type_=int)
             print("Working... got %6d data points" % samples, end='\r')
             time.sleep(0.1)
 
@@ -390,12 +394,12 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
     except KeyboardInterrupt as ex:
         print()
         print('Cancelled - stopping program')
-        comm.program(coord_sys, prog, stop=True)
+        gpascii.program(coord_sys, prog, stop=True)
         if cancel_callback is not None:
             cancel_callback(ex)
 
     try:
-        for line in comm.read_timeout(timeout=0.1):
+        for line in gpascii.read_timeout(timeout=0.1):
             if 'error' in line:
                 print(line)
     except pp_comm.TimeoutError:
@@ -419,11 +423,11 @@ def main():
     from pp_comm import PPComm
 
     comm = PPComm()
-    comm.open_channel()
-    servo_period = comm.servo_period
+    gpascii = comm.gpascii_channel()
+    servo_period = gpascii.servo_period
     print('new servo period is', servo_period)
 
-    ramp_cmd = ramp(3, distance=0.01, velocity=0.01)
+    ramp_cmd = ramp(3, distance=0.01, velocity=0.02)
     if 1:
         run_tune_program(comm, ramp_cmd)
     else:

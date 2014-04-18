@@ -54,8 +54,8 @@ def check_alias(c, name):
 
 
 class PPCompleterNode(object):
-    def __init__(self, conn, parent, row, index=None, ppmac=None):
-        self.ppmac = ppmac
+    def __init__(self, conn, parent, row, index=None, gpascii=None):
+        self.gpascii = gpascii
         self.conn = conn
         self.row = row
         self.index = index
@@ -149,10 +149,10 @@ class PPCompleterNode(object):
         except KeyError:
             if full_name.endswith('[]'):
                 node = PPCompleterList(self.conn, self.full_name, row,
-                                       ppmac=self.ppmac)
+                                       gpascii=self.gpascii)
             else:
                 node = PPCompleterNode(self.conn, self.full_name, row,
-                                       ppmac=self.ppmac)
+                                       gpascii=self.gpascii)
 
             self._cache[full_name] = node
             return node
@@ -198,8 +198,8 @@ class PPCompleterNode(object):
 
     @property
     def value(self):
-        if self.ppmac is not None:
-            return self.ppmac.get_variable(self.full_name)
+        if self.gpascii is not None:
+            return self.gpascii.get_variable(self.full_name)
         else:
             return None
 
@@ -207,14 +207,14 @@ class PPCompleterNode(object):
 
 
 class PPCompleterList(object):
-    def __init__(self, conn, parent, row, ppmac=None):
-        self.ppmac = ppmac
+    def __init__(self, conn, parent, row, gpascii=None):
+        self.gpascii = gpascii
         self.conn = conn
         self.row = row
         self.name = row['Command']
         self.parent = parent
         self.item0 = PPCompleterNode(self.conn, self.parent, self.row, index=0,
-                                     ppmac=ppmac)
+                                     gpascii=gpascii)
         self.items = {0: self.item0}
 
     @property
@@ -229,7 +229,7 @@ class PPCompleterList(object):
             return self.items[idx]
         except KeyError:
             node = PPCompleterNode(self.conn, self.parent, self.row, index=idx,
-                                   ppmac=self.ppmac)
+                                   gpascii=self.gpascii)
             self.items[idx] = node
             return node
 
@@ -251,9 +251,9 @@ class PPCompleterList(object):
 
 
 class PPCompleter(object):
-    def __init__(self, conn, ppmac=None):
+    def __init__(self, conn, gpascii=None):
         self.conn = conn
-        self.ppmac = ppmac
+        self.gpascii = gpascii
 
         tbl0 = conn.cursor()
         tbl0.execute('select * from software_tbl0')
@@ -271,9 +271,9 @@ class PPCompleter(object):
             return self._cache[full_name]
         except KeyError:
             if full_name.endswith('[]'):
-                node = PPCompleterList(self.conn, '', row, ppmac=self.ppmac)
+                node = PPCompleterList(self.conn, '', row, gpascii=self.gpascii)
             else:
-                node = PPCompleterNode(self.conn, '', row, ppmac=self.ppmac)
+                node = PPCompleterNode(self.conn, '', row, gpascii=self.gpascii)
 
             self._cache[full_name] = node
             return node
@@ -334,20 +334,20 @@ def dict_factory(cursor, row):
     return d
 
 
-def start_completer_from_db(dbfile=':memory:', ppmac=None):
+def start_completer_from_db(dbfile=':memory:', gpascii=None):
     conn = sqlite.connect(dbfile)
     conn.row_factory = dict_factory
-    return PPCompleter(conn, ppmac=ppmac)
+    return PPCompleter(conn, gpascii=gpascii)
 
 
-def start_completer_from_sql_script(script, db_file, ppmac=None):
+def start_completer_from_sql_script(script, db_file, gpascii=None):
     conn = sqlite.connect(db_file)
     conn.row_factory = dict_factory
 
     c = conn.cursor()
     c.executescript(script)
     conn.commit()
-    return PPCompleter(conn, ppmac=ppmac)
+    return PPCompleter(conn, gpascii=gpascii)
 
 
 def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
@@ -356,7 +356,8 @@ def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
 
 
 def start_completer_from_mysql(mysql_host, ppmac_ip, mysql_user='root',
-                               script='mysql2sqlite.sh', db_file=':memory:'):
+                               script='mysql2sqlite.sh', db_file=':memory:',
+                               gpascii=None):
     """
     database is 'ppmac' + ip address with dots as underscores:
     so 10.0.0.98 -> ppmac10_0_0_98
@@ -391,7 +392,7 @@ def start_completer_from_mysql(mysql_host, ppmac_ip, mysql_user='root',
         print('Failed (ret=%d): %s' % (ex.returncode, ex.output))
         return None
 
-    return start_completer_from_sql_script(sqlite_sql, db_file)
+    return start_completer_from_sql_script(sqlite_sql, db_file, gpascii=gpascii)
 
 
 def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
@@ -407,7 +408,8 @@ def main(ppmac_ip='10.0.0.98', windows_ip='10.0.0.6'):
     if c is None:
         if os.path.exists(db_file):
             os.unlink(db_file)
-        c = start_completer_from_mysql(windows_ip, ppmac_ip, db_file=db_file)
+        c = start_completer_from_mysql(windows_ip, ppmac_ip, db_file=db_file,
+                                       gpascii=None)
 
     if c is None:
         sys.exit(1)

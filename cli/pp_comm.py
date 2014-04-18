@@ -2,6 +2,8 @@ from __future__ import print_function
 import os
 import re
 import time
+import logging
+import threading
 
 import paramiko
 
@@ -11,273 +13,263 @@ PPMAC_USER = os.environ.get('PPMAC_USER', 'root')
 PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
 
 
-class PPCommError(Exception): pass
-class CommandFailedError(PPCommError): pass
-class TimeoutError(PPCommError): pass
-class GPError(PPCommError): pass
+class PPCommError(Exception):
+    pass
 
 
-class PPComm(object):
-    VAR_SERVO_PERIOD = 'Sys.ServoPeriod'
-    CMD_GPASCII = 'gpascii -2'
-    EOT = '\04'
+class PPCommChannelClosed(PPCommError):
+    pass
 
-    def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
-                 user=PPMAC_USER, password=PPMAC_PASS):
-        self._host = host
-        self._port = port
-        self._user = user
-        self._pass = password
-        self._gpascii = False
 
-        self._client = None
-        self._channel = None
-        self._channel_cmd = ''
+class CommandFailedError(PPCommError):
+    pass
 
-    def __copy__(self):
-        ret = PPComm(host=self._host, port=self._port,
-                     user=self._user, password=self._pass)
-        if self._channel is not None:
-            ret.open_channel(self._channel_cmd)
-        if self._gpascii:
-            ret.open_gpascii()
-        return ret
 
-    def open_channel(self, cmd=''):
-        if self._channel is not None:
-            raise ValueError('Channel already open')
+class TimeoutError(PPCommError):
+    pass
 
-        client = paramiko.SSHClient()
-        client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(self._host, self._port, username=self._user, password=self._pass)
 
-        channel = client.invoke_shell()
-        if cmd:
-            channel.send('%s\n' % cmd)
+class GPError(PPCommError):
+    pass
 
-        self._client = client
-        self._channel = channel
-        self._channel_cmd = cmd
-        if not cmd:
-            # Turn off local echoing of commands
-            self.send_line('/bin/bash --noediting')
-            self.send_line('stty -echo')
-            self.wait_for('%s@.*' % self._user)
 
-        return client, channel
+comm_logger = logging.getLogger('ppmac.Comm')
+# comm_logger.setLevel(logging.DEBUG)
 
-    def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
-        channel = self._channel
+logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                    datefmt='%m-%d %H:%M',
+                    )
 
-        t0 = time.time()
-        buf = ''
+PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
+                  re.compile('^UnlinkGatherThread:.*'),
+                  ]
 
-        def check_timeout():
-            if timeout is None:
-                return True
-            return ((time.time() - t0) <= timeout)
 
-        while channel.recv_ready() or check_timeout():
-            if channel.recv_ready():
-                buf += channel.recv(1024)
-                lines = buf.split(delim)
-                if not buf.endswith(delim):
-                    buf = lines[-1]
-                    lines = lines[:-1]
-                else:
-                    buf = ''
+def _wait_for(generator, wait_pattern,
+              verbose=False, remove_matching=[],
+              remove_ppmac_messages=True, rstrip=True):
+    if remove_ppmac_messages:
+        remove_matching = list(remove_matching) + PPMAC_MESSAGES
 
-                for line in lines:
-                    if verbose:
-                        print(line)
-                    yield line.rstrip()
+    wait_re = re.compile(wait_pattern)
 
-            else:
-                time.sleep(0.01)
+    for line in generator:
+        if rstrip:
+            line = line.rstrip()
 
-            if channel.recv_stderr_ready():
-                print('<stderr- %s' % channel.recv_stderr(1024), end='')
+        if line == wait_pattern:
+            break
 
-        raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
+        m = wait_re.match(line)
+        if m is not None:
+            yield line, m
+
+        if verbose:
+            print(line)
+
+        skip = False
+        for regex in remove_matching:
+            m = regex.match(line)
+            if m is not None:
+                skip = True
+                break
+
+        if not skip:
+            yield line, None
+
+
+class ShellChannel(object):
+    def __init__(self, comm, command=None, single=False):
+        self.lock = threading.RLock()
+        self._comm = comm
+        self._client = comm._client
+        self._channel = comm._client.invoke_shell()
+
+        self.send_line('/bin/bash --noediting')
+        self.send_line('stty -echo')
+        self.wait_for('%s@.*' % comm._user)
+
+        if command is not None:
+            self.send_line(command)
+
+    @property
+    def _logger(self):
+        return comm_logger
 
     def wait_for(self, wait_pattern, timeout=5.0, verbose=False,
                  remove_matching=[], **kwargs):
-        wait_re = re.compile(wait_pattern)
 
-        lines = []
-        for line in self.read_timeout(timeout, **kwargs):
-            #if not verbose:
-            #    print('* %s' % line)
-            if line == wait_pattern:
-                return lines, []
-
-            m = wait_re.match(line)
-            if m is not None:
-                return lines, m.groups()
-
-            if verbose:
-                print(line)
-
-            skip = False
-            for regex in remove_matching:
-                m = regex.match(line)
+        with self.lock:
+            gen = self.read_timeout(timeout, **kwargs)
+            ret = []
+            for line, m in _wait_for(gen, wait_pattern,
+                                     verbose=verbose, remove_matching=remove_matching):
+                ret.append(line)
                 if m is not None:
-                    skip = True
-                    break
+                    return ret, m.groups()
 
-            if not skip:
-                lines.append(line)
-
-        return None
+            return False
 
     def sync(self, verbose=False):
         channel = self._channel
+        if channel is None:
+            raise PPCommChannelClosed()
 
-        while channel.recv_ready():
-            data = channel.recv(1024)
+        with self.lock:
+            self._logger.debug('Sync')
+
+            while channel.recv_ready():
+                data = channel.recv(1024)
+                if verbose:
+                    print(data, end='')
+
             if verbose:
-                print(data, end='')
+                print()
 
-        if verbose:
-            print()
+    def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
+        channel = self._channel
+        if channel is None:
+            raise PPCommChannelClosed()
 
-    def shell_command(self, command, wait=True, done_tag='.CMD_DONE.',
-                      remove_ppmac_messages=True, **kwargs):
-        self.close_gpascii()
+        with self.lock:
+            t0 = time.time()
+            buf = ''
 
-        self.sync()
-        self.send_line(command)
-        self.send_line('echo "%s"' % done_tag)
-        if remove_ppmac_messages:
-            matches = [re.compile('.*\/\/ \*\*\* exit'),
-                       re.compile('^UnlinkGatherThread:.*'),
-                       ]
-        else:
-            matches = []
+            def check_timeout():
+                if timeout is None:
+                    return True
+                return ((time.time() - t0) <= timeout)
 
-        return self.wait_for('.*(%s)$' % re.escape(done_tag),
-                             remove_matching=matches, **kwargs)[0]
+            while channel.recv_ready() or check_timeout():
+                if channel.recv_ready():
+                    buf += channel.recv(1024)
+                    lines = buf.split(delim)
+                    if not buf.endswith(delim):
+                        buf = lines[-1]
+                        lines = lines[:-1]
+                    else:
+                        buf = ''
 
-    def read_file(self, filename, timeout=5.0):
-        eof_tag = 'FILE_EOF_FILE_EOF'
-        cmd = 'cat "%(filename)s"' % locals()
-        lines = self.shell_command(cmd, timeout=timeout)
+                    for line in lines:
+                        if verbose:
+                            print(line)
+                        self._logger.debug('<- %s' % line)
+                        yield line.rstrip()
 
-        # just quick hacks, as usual
-        first_idx = 0
-        for i, line in enumerate(lines):
-            if cmd in line:
-                first_idx = i + 1
-        lines = lines[first_idx:]
-        while lines and (eof_tag in lines[-1] or not lines[-1].strip()):
-            lines = lines[:-1]
+                else:
+                    time.sleep(0.01)
 
-        #print('Read %d lines of file %s' % (len(lines), filename))
-        return lines
+                if channel.recv_stderr_ready():
+                    line = channel.recv_stderr(1024)
+                    print('<stderr- %s' % line, end='')
+                    self._logger.debug('<stderr- %s' % line)
 
-    def send_file(self, filename, contents):
-        eof_tag = 'FILE_EOF_FILE_EOF'
-        cmd = '''cat 2> /dev/null > "%(filename)s" <<'%(eof_tag)s'
-%(contents)s
-%(eof_tag)s
-''' % locals()
-
-        return self.shell_command(cmd)
+            raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
     def send_line(self, line, delim='\n'):
         channel = self._channel
-        channel.send('%s%s' % (line, delim))
+        if channel is None:
+            raise PPCommChannelClosed()
 
-    def open_gpascii(self):
-        if not self._gpascii:
+        with self.lock:
+            self._logger.debug('-> %s' % line)
+            channel.send('%s%s' % (line, delim))
+
+    def run(self, command, wait=True, done_tag='.CMD_DONE.',
+            **kwargs):
+        self._logger.debug('Running: %s' % command)
+
+        with self.lock:
             self.sync()
-            self.send_line(self.CMD_GPASCII)
-            if self.wait_for('.*(STDIN Open for ASCII Input)$'):
-                self._gpascii = True
-                #print('GPASCII mode')
+            self.send_line(command)
+            self.send_line('echo "%s"' % done_tag)
+            return self.wait_for('.*(%s)$' % re.escape(done_tag),
+                                 **kwargs)[0]
+
+
+class GpasciiChannel(ShellChannel):
+    CMD_GPASCII = 'gpascii -2'
+    EOT = '\04'
+    VAR_SERVO_PERIOD = 'Sys.ServoPeriod'
+
+    def __init__(self, comm, command=None):
+        if command is None:
+            command = self.CMD_GPASCII
+
+        ShellChannel.__init__(self, comm, command=command)
+
+        if not self.wait_for('.*(STDIN Open for ASCII Input)$'):
+            raise ValueError('GPASCII startup string not found')
+
+    def close(self):
+        channel = self._channel
+        self.sync()
+        channel.send(self.EOT)
+
+    __del__ = close
 
     def set_variable(self, var, value, check=True):
-        if not self._gpascii:
-            self.open_gpascii()
-
         var = var.lower()
         self.send_line('%s=%s' % (var, value))
         if check:
             return self.get_variable(var)
 
     def get_variable(self, var, type_=str, timeout=0.2):
-        if not self._gpascii:
-            self.open_gpascii()
-
         var = var.lower()
-        self.send_line(var)
+        with self.lock:
+            self.send_line(var)
 
-        for line in self.read_timeout(timeout=timeout):
-            if 'error' in line:
-                raise GPError(line)
-            #print('<-', line)
-            if '=' in line:
-                vname, value = line.split('=', 1)
-                if var == vname.lower():
-                    return type_(value)
+            for line in self.read_timeout(timeout=timeout):
+                if 'error' in line:
+                    raise GPError(line)
+                #print('<-', line)
+                if '=' in line:
+                    vname, value = line.split('=', 1)
+                    if var == vname.lower():
+                        return type_(value)
 
     def kill_motor(self, motor):
-        self.open_gpascii()
         self.send_line('#%dk' % (motor, ))
 
     def kill_motors(self, motors):
-        self.open_gpascii()
         motor_list = list(set(motors))
         motor_list.sort()
         motor_list = ','.join('%d' % motor for motor in motor_list)
 
         self.send_line('#%sk' % (motor_list, ))
 
-    def close_gpascii(self):
-        if self._gpascii:
-            channel = self._channel
-            self.sync()
-            channel.send(self.EOT)
-            self._gpascii = False
-
     @property
     def servo_period(self):
         period = self.get_variable(self.VAR_SERVO_PERIOD, type_=float)
         return period * 1e-3
 
-    def close(self):
-        # TODO
-        self.comm = None
-
     def get_coord(self, motor):
-        if not self._gpascii:
-            self.open_gpascii()
+        with self.lock:
+            self.send_line('&0#%d->' % motor)
 
-        self.send_line('&0#%d->' % motor)
+            for line in self.read_timeout():
+                if 'error' in line:
+                    raise GPError(line)
 
-        for line in self.read_timeout():
-            if 'error' in line:
-                raise GPError(line)
+                #print('<-', line)
+                if '#' in line:
+                    # <- &2#1->x
+                    # ('&2', '2', '1', 'x')
+                    # <- #3->0
+                    # (None, None, '3', '0')
 
-            #print('<-', line)
-            if '#' in line:
-                # <- &2#1->x
-                # ('&2', '2', '1', 'x')
-                # <- #3->0
-                # (None, None, '3', '0')
-
-                m = re.search('(&(\d+))?#(\d+)->([a-zA-Z0-9]+)', line)
-                if m:
-                    groups = m.groups()
-                    _, coord, mnum, assigned = groups
-                    if assigned == '0':
-                        assigned = None
-                    if int(mnum) == motor:
-                        if coord is None:
-                            coord = 0
-                        else:
-                            coord = int(coord)
-                        return coord, assigned
+                    m = re.search('(&(\d+))?#(\d+)->([a-zA-Z0-9]+)', line)
+                    if m:
+                        groups = m.groups()
+                        _, coord, mnum, assigned = groups
+                        if assigned == '0':
+                            assigned = None
+                        if int(mnum) == motor:
+                            if coord is None:
+                                coord = 0
+                            else:
+                                coord = int(coord)
+                            return coord, assigned
 
         return None, None
 
@@ -294,25 +286,27 @@ class PPComm(object):
         return coords
 
     def set_coords(self, coords, verbose=False):
-        self.open_gpascii()
-        self.send_line('undefine all')
-        if not coords:
-            return
+        with self.lock:
+            self.send_line('undefine all')
+            if not coords:
+                return
 
-        max_coord = max(coords.keys())
-        if max_coord > self.get_variable('sys.maxcoords', type_=int):
-            if verbose:
-                print('Increasing maxcoords to %d' % (max_coord + 1))
-            self.set_variable('sys.maxcoords', max_coord + 1)
-
-        for coord, motors in coords.items():
-            for motor, assigned in motors.items():
-                send_ = '&%d#%d->%s' % (coord, motor, assigned)
+            max_coord = max(coords.keys())
+            if max_coord > self.get_variable('sys.maxcoords', type_=int):
                 if verbose:
-                    print('Coordinate system %d: motor %d is %s' %
-                          (coord, motor, assigned))
+                    print('Increasing maxcoords to %d' % (max_coord + 1))
+                self.set_variable('sys.maxcoords', max_coord + 1)
 
-                self.send_line(send_)
+            for coord, motors in coords.items():
+                for motor, assigned in motors.items():
+                    send_ = '&%d#%d->%s' % (coord, motor, assigned)
+                    if verbose:
+                        print('Coordinate system %d: motor %d is %s' %
+                              (coord, motor, assigned))
+
+                    self.send_line(send_)
+
+            self.sync()
 
         if verbose:
             print('Done')
@@ -341,29 +335,104 @@ class PPComm(object):
         self.send_line(command)
 
 
+class PPComm(object):
+    def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
+                 user=PPMAC_USER, password=PPMAC_PASS):
+        self._host = host
+        self._port = port
+        self._user = user
+        self._pass = password
+
+        self._client = paramiko.SSHClient()
+        self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        self._client.connect(self._host, self._port,
+                             username=self._user, password=self._pass)
+
+        self.gpascii = self.gpascii_channel()
+
+    def __copy__(self):
+        return PPComm(host=self._host, port=self._port,
+                      user=self._user, password=self._pass)
+
+    def gpascii_channel(self, cmd=None):
+        if cmd is not None:
+            return GpasciiChannel(self, cmd)
+        else:
+            return GpasciiChannel(self)
+
+    def gpascii_file(self, filename):
+        return self.shell_command('gpascii -i"%s"' % filename)
+
+    def shell_channel(self, cmd=None):
+        return ShellChannel(self, cmd)
+
+    def shell_command(self, command, verbose=False, **kwargs):
+        stdin, stdout, stderr = self._client.exec_command(command, **kwargs)
+
+        if verbose:
+            ret = []
+            for line in stdout.readlines():
+                print(line.rstrip())
+                ret.append(line)
+            return ret
+
+        else:
+            return stdout.readlines()
+
+    def shell_output(self, command, wait_match=None, timeout=None, **kwargs):
+        stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+
+        if wait_match is not None:
+            for line, m in _wait_for(stdout.readlines(), wait_match, **kwargs):
+                yield line, m
+        else:
+            for line in stdout.readlines():
+                yield line.rstrip('\n')
+
+    def read_file(self, filename, timeout=5.0):
+        cmd = 'cat "%s"' % filename
+        return self.shell_command(cmd, timeout=timeout)
+
+    def send_file(self, filename, contents):
+        eof_tag = 'FILE_%s_EOF' % time.time()
+        cmd = '''cat 2> /dev/null > "%(filename)s" <<'%(eof_tag)s'
+%(contents)s%(eof_tag)s''' % locals()
+
+        return self.shell_command(cmd)
+
+
 class CoordinateSave(object):
     """
     Context manager that saves/restores the current coordinate
     system setup
     """
     def __init__(self, comm, verbose=True):
-        self.comm = comm
+        self.channel = comm.gpascii_channel()
         self.verbose = verbose
 
     def __enter__(self):
-        self.coords = self.comm.get_coords()
+        self.coords = self.channel.get_coords()
 
     def __exit__(self, type_, value, traceback):
-        self.comm.set_coords(self.coords, verbose=self.verbose)
+        self.channel.set_coords(self.coords, verbose=self.verbose)
 
 
 def main():
     comm = PPComm()
-    comm.open_channel()
-
-    coords = comm.get_coords()
+    chan = comm.gpascii_channel()
+    print('channel opened')
+    coords = chan.get_coords()
     print('coords are', coords)
-    comm.set_coords(coords)
+    # coords = {1: {11: 'x'}, 2: {12: 'x'}, 3: {1: 'x'}}
+    chan.set_coords(coords)
+
+    # chan = comm.shell_channel()
+    passwd = comm.read_file('/etc/passwd')
+    tmp_file = '/tmp/blah'
+
+    comm.send_file(tmp_file, ''.join(passwd))
+    read_ = comm.read_file(tmp_file)
+    assert(passwd == read_)
 
 if __name__ == '__main__':
     main()
