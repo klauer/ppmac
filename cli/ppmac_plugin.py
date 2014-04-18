@@ -1318,8 +1318,8 @@ def build_utility(comm, source_files, output_name,
     if cleanup:
         print('Cleaning up...')
         for fn in source_files:
-            comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, fn)))
-        comm.shell_command('rm -rf "%s"' % (os.path.join(dest_path, 'Makefile')))
+            comm.remove_file(os.path.join(dest_path, fn))
+        comm.remove_file(os.path.join(dest_path, 'Makefile'))
 
     errored = False
     for line in lines:

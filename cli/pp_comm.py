@@ -349,6 +349,7 @@ class PPComm(object):
                              username=self._user, password=self._pass)
 
         self.gpascii = self.gpascii_channel()
+        self._sftp = None
 
     def __copy__(self):
         return PPComm(host=self._host, port=self._port,
@@ -389,16 +390,23 @@ class PPComm(object):
             for line in stdout.readlines():
                 yield line.rstrip('\n')
 
+    @property
+    def sftp(self):
+        if self._sftp is None:
+            self._sftp = self._client.open_sftp()
+
+        return self._sftp
+
     def read_file(self, filename, timeout=5.0):
-        cmd = 'cat "%s"' % filename
-        return self.shell_command(cmd, timeout=timeout)
+        with self.sftp.file(filename, 'rb') as f:
+            return f.readlines()
 
     def send_file(self, filename, contents):
-        eof_tag = 'FILE_%s_EOF' % time.time()
-        cmd = '''cat 2> /dev/null > "%(filename)s" <<'%(eof_tag)s'
-%(contents)s%(eof_tag)s''' % locals()
+        with self.sftp.file(filename, 'wb') as f:
+            print(contents, end='', file=f)
 
-        return self.shell_command(cmd)
+    def remove_file(self, filename):
+        self.sftp.unlink(filename)
 
 
 class CoordinateSave(object):
