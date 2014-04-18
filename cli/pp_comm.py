@@ -21,10 +21,6 @@ class PPCommChannelClosed(PPCommError):
     pass
 
 
-class CommandFailedError(PPCommError):
-    pass
-
-
 class TimeoutError(PPCommError):
     pass
 
@@ -36,9 +32,9 @@ class GPError(PPCommError):
 comm_logger = logging.getLogger('ppmac.Comm')
 # comm_logger.setLevel(logging.DEBUG)
 
-logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                    datefmt='%m-%d %H:%M',
-                    )
+#logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+#                    datefmt='%m-%d %H:%M',
+#                    )
 
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
@@ -48,6 +44,13 @@ PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
 def _wait_for(generator, wait_pattern,
               verbose=False, remove_matching=[],
               remove_ppmac_messages=True, rstrip=True):
+    """
+    Wait, up until `timeout` seconds, for wait_pattern
+
+    Removes `remove_matching` regular expressions from the
+    output.
+    """
+
     if remove_ppmac_messages:
         remove_matching = list(remove_matching) + PPMAC_MESSAGES
 
@@ -79,6 +82,10 @@ def _wait_for(generator, wait_pattern,
 
 
 class ShellChannel(object):
+    """
+    An interactive SSH shell channel
+    """
+
     def __init__(self, comm, command=None, single=False):
         self.lock = threading.RLock()
         self._comm = comm
@@ -98,6 +105,12 @@ class ShellChannel(object):
 
     def wait_for(self, wait_pattern, timeout=5.0, verbose=False,
                  remove_matching=[], **kwargs):
+        """
+        Wait, up until `timeout` seconds, for wait_pattern
+
+        Removes `remove_matching` regular expressions from the
+        output.
+        """
 
         with self.lock:
             gen = self.read_timeout(timeout, **kwargs)
@@ -111,6 +124,9 @@ class ShellChannel(object):
             return False
 
     def sync(self, verbose=False):
+        """
+        Empty the incoming read buffer
+        """
         channel = self._channel
         if channel is None:
             raise PPCommChannelClosed()
@@ -127,6 +143,10 @@ class ShellChannel(object):
                 print()
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
+        """
+        Generator which reads lines from the channel,
+        optionally outputting the lines to stdout (if verbose=True)
+        """
         channel = self._channel
         if channel is None:
             raise PPCommChannelClosed()
@@ -167,6 +187,9 @@ class ShellChannel(object):
             raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
     def send_line(self, line, delim='\n'):
+        """
+        Send a single line of text (with a delimiter at the end)
+        """
         channel = self._channel
         if channel is None:
             raise PPCommChannelClosed()
@@ -175,19 +198,13 @@ class ShellChannel(object):
             self._logger.debug('-> %s' % line)
             channel.send('%s%s' % (line, delim))
 
-    def run(self, command, wait=True, done_tag='.CMD_DONE.',
-            **kwargs):
-        self._logger.debug('Running: %s' % command)
-
-        with self.lock:
-            self.sync()
-            self.send_line(command)
-            self.send_line('echo "%s"' % done_tag)
-            return self.wait_for('.*(%s)$' % re.escape(done_tag),
-                                 **kwargs)[0]
-
 
 class GpasciiChannel(ShellChannel):
+    """
+    An SSH channel which represents a connection to
+    Gpascii, the Power PMAC command interpreter
+    """
+
     CMD_GPASCII = 'gpascii -2'
     EOT = '\04'
     VAR_SERVO_PERIOD = 'Sys.ServoPeriod'
@@ -202,6 +219,9 @@ class GpasciiChannel(ShellChannel):
             raise ValueError('GPASCII startup string not found')
 
     def close(self):
+        """
+        Close the gpascii connection
+        """
         channel = self._channel
         self.sync()
         channel.send(self.EOT)
@@ -209,12 +229,24 @@ class GpasciiChannel(ShellChannel):
     __del__ = close
 
     def set_variable(self, var, value, check=True):
+        """
+        Set a Power PMAC variable to value
+        """
         var = var.lower()
         self.send_line('%s=%s' % (var, value))
         if check:
             return self.get_variable(var)
 
     def get_variable(self, var, type_=str, timeout=0.2):
+        """
+        Get a Power PMAC variable, and typecast it to type_
+
+        e.g.,
+        >> comm.get_variable('i100', type_=str)
+        '0'
+        >> comm.get_variable('i100', type_=int)
+        0
+        """
         var = var.lower()
         with self.lock:
             self.send_line(var)
@@ -229,9 +261,15 @@ class GpasciiChannel(ShellChannel):
                         return type_(value)
 
     def kill_motor(self, motor):
+        """
+        Kill a specific motor
+        """
         self.send_line('#%dk' % (motor, ))
 
     def kill_motors(self, motors):
+        """
+        Kill a list of motors
+        """
         motor_list = list(set(motors))
         motor_list.sort()
         motor_list = ','.join('%d' % motor for motor in motor_list)
@@ -240,10 +278,16 @@ class GpasciiChannel(ShellChannel):
 
     @property
     def servo_period(self):
+        """
+        The servo period, in seconds
+        """
         period = self.get_variable(self.VAR_SERVO_PERIOD, type_=float)
         return period * 1e-3
 
     def get_coord(self, motor):
+        """
+        Query a motor to determine which coordinate system it's in
+        """
         with self.lock:
             self.send_line('&0#%d->' % motor)
 
@@ -274,6 +318,15 @@ class GpasciiChannel(ShellChannel):
         return None, None
 
     def get_coords(self):
+        """
+        Returns the coordinate system setup
+
+        For example:
+            {1: {11: 'x'}, 2: {1: 'x', 12: 'y'}}
+        Sets:
+            coordinate system 1, motor 11 is X
+            coordinate system 2, motor 1 is X, motor 12 is Y
+        """
         num_motors = self.get_variable('sys.maxmotors', type_=int)
         coords = {}
         for motor in range(num_motors):
@@ -286,6 +339,16 @@ class GpasciiChannel(ShellChannel):
         return coords
 
     def set_coords(self, coords, verbose=False):
+        """
+        Clear and then set all of the coordinate systems
+        as in `coords`.
+
+        For example:
+            {1: {11: 'x'}, 2: {1: 'x', 12: 'y'}}
+        Sets:
+            coordinate system 1, motor 11 is X
+            coordinate system 2, motor 1 is X, motor 12 is Y
+        """
         with self.lock:
             self.send_line('undefine all')
             if not coords:
@@ -336,6 +399,10 @@ class GpasciiChannel(ShellChannel):
 
 
 class PPComm(object):
+    """
+    Power PMAC Communication via ssh/sftp
+    """
+
     def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
                  user=PPMAC_USER, password=PPMAC_PASS):
         self._host = host
@@ -356,18 +423,31 @@ class PPComm(object):
                       user=self._user, password=self._pass)
 
     def gpascii_channel(self, cmd=None):
+        """
+        Create a new gpascii channel -- an independent
+        gpascii process running on the remote machine
+        """
         if cmd is not None:
             return GpasciiChannel(self, cmd)
         else:
             return GpasciiChannel(self)
 
     def gpascii_file(self, filename):
+        """
+        Execute a gpascii script by remote filename
+        """
         return self.shell_command('gpascii -i"%s"' % filename)
 
     def shell_channel(self, cmd=None):
+        """
+        Create a new SSH channel connected to a shell
+        """
         return ShellChannel(self, cmd)
 
     def shell_command(self, command, verbose=False, **kwargs):
+        """
+        Execute a command in a remote shell
+        """
         stdin, stdout, stderr = self._client.exec_command(command, **kwargs)
 
         if verbose:
@@ -381,6 +461,12 @@ class PPComm(object):
             return stdout.readlines()
 
     def shell_output(self, command, wait_match=None, timeout=None, **kwargs):
+        """
+        Execute command, and wait up until timeout
+
+        If wait_match is set to a regular expression, each line
+        will be compared against it.
+        """
         stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
 
         if wait_match is not None:
@@ -392,20 +478,51 @@ class PPComm(object):
 
     @property
     def sftp(self):
+        """
+        The SFTP instance associated with the SSH client
+        """
         if self._sftp is None:
             self._sftp = self._client.open_sftp()
 
         return self._sftp
 
     def read_file(self, filename, timeout=5.0):
+        """
+        Read a remote file, result is a list of lines
+        """
         with self.sftp.file(filename, 'rb') as f:
             return f.readlines()
 
-    def send_file(self, filename, contents):
-        with self.sftp.file(filename, 'wb') as f:
-            print(contents, end='', file=f)
+    def file_exists(self, remote):
+        """
+        Check to see if a remote file exists
+        """
+
+        try:
+            with self.sftp.file(remote, 'rb') as f:
+                pass
+        except:
+            return False
+        else:
+            return True
+
+    def send_file(self, local, remote):
+        """
+        Send via sftp a local file to the remote machine
+        """
+        self.sftp.put(local, remote)
+
+    def write_file(self, filename, contents):
+        """
+        Write a remote file with the given contents via sftp
+        """
+        with self.sftp.file(filename, 'wb') as remote_f:
+            remote_f.write(contents)
 
     def remove_file(self, filename):
+        """
+        Remove a file on the remote machine
+        """
         self.sftp.unlink(filename)
 
 
@@ -438,7 +555,7 @@ def main():
     passwd = comm.read_file('/etc/passwd')
     tmp_file = '/tmp/blah'
 
-    comm.send_file(tmp_file, ''.join(passwd))
+    comm.write_file(tmp_file, ''.join(passwd))
     read_ = comm.read_file(tmp_file)
     assert(passwd == read_)
 

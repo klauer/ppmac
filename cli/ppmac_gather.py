@@ -127,7 +127,7 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
 
     settings = get_settings(addresses, duration=duration, period=period)
 
-    if comm.send_file(gather_config_file, '\n'.join(settings)):
+    if comm.write_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
     comm.gpascii_file(gather_config_file)
@@ -359,7 +359,7 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
 
     settings = get_settings(gather_vars, period=period,
                             samples=samples)
-    if comm.send_file(gather_config_file, '\n'.join(settings)):
+    if comm.write_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
     comm.gpascii_file(gather_config_file)

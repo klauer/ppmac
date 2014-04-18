@@ -957,7 +957,7 @@ class PpmacCore(Configurable):
                              run=args.run)
 
     @magic_arguments()
-    @argument('module', type=unicode,
+    @argument('remote_module', type=unicode,
               help='Kernel module remote filename')
     @argument('name', type=unicode,
               help='Phase function name')
@@ -965,27 +965,47 @@ class PpmacCore(Configurable):
               help='Motor number(s)')
     @argument('-u', '--unload', action='store_true',
               help='Unload kernel module first (reload)')
+    @argument('-f', '--upload', type=unicode,
+              help='Upload local file (replaces remote module)')
     def userphase(self, magic_self, arg):
+        """
+        Enable user phase for motor(s)
+
+        1. Optionally unloads module
+        2. Optionally uploads a locally compiled module
+        3. Disables the motor phase control for all motors
+        4. Inserts the kernel module
+        5. Sets the phase function address for each motor (via userphase util)
+        6. Enables the motor phase control for all motors
+        """
         args = parse_argstring(self.userphase, arg)
 
         if not args or not self.check_comm():
             return
 
         if args.unload:
-            self.comm.shell_command('rmmod %s' % args.module, verbose=True)
+            self.comm.shell_command('rmmod %s' % args.remote_module, verbose=True)
 
-        for motor in args.motors:
-            self.set_variable('Motor[%d].PhaseCtrl' % motor, 0)
+        if args.upload:
+            self.comm.send_file(args.upload, args.remote_module)
 
-        self.comm.shell_command('insmod %s' % args.module, verbose=True)
-        self.comm.shell_command('lsmod |grep %s' % args.module, verbose=True)
+        def set_phase(value):
+            """
+            Enable/disable phase control for all motors
+            """
+            for motor in args.motors:
+                self.set_variable('Motor[%d].PhaseCtrl' % motor, value)
+
+        set_phase(0)
+
+        self.comm.shell_command('insmod %s' % args.remote_module, verbose=True)
+        self.comm.shell_command('lsmod |grep %s' % args.remote_module, verbose=True)
 
         for motor in args.motors:
             self.comm.shell_command('/var/ftp/usrflash/userphase -l %d %s' % (motor, args.name),
                                     verbose=True)
 
-        for motor in args.motors:
-            self.comm.gpascii.set_variable('Motor[%d].PhaseCtrl' % motor, 1)
+        set_phase(1)
 
     @magic_arguments()
     @argument('coord', type=int,
@@ -995,6 +1015,11 @@ class PpmacCore(Configurable):
     @argument('variables', nargs='*', type=unicode,
               help='Variables to monitor while running')
     def prog_run(self, magic_self, arg):
+        """
+        Run a motion program in a coordinate system.
+
+        Optionally monitor variables (at a low rate) during execution
+        """
         args = parse_argstring(self.prog_run, arg)
 
         if not args or not self.check_comm():
@@ -1080,6 +1105,8 @@ class PpmacCore(Configurable):
 
         if not args or not self.check_comm():
             return
+
+        ## TODO
 
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,
@@ -1302,7 +1329,7 @@ def build_utility(comm, source_files, output_name,
 
     makefile_text = create_util_makefile(source_files, output_name)
 
-    comm.send_file(os.path.join(dest_path, 'Makefile'), makefile_text)
+    comm.write_file(os.path.join(dest_path, 'Makefile'), local_file=makefile_text)
     print('Sending Makefile')
     for fn in source_files:
         text = open(fn, 'r').read()
