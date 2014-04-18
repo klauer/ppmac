@@ -59,6 +59,7 @@ def get_pmc_path(base_path, fn):
 
     return subdir
 
+
 def get_cfg_path(base_path, fn):
     if fn in ('pre_make.cfg', 'post_make.cfg'):
         return ''
@@ -163,16 +164,19 @@ def output_config(base_path, project_files, release=True):
             continue
 
         local_file, remote_file = fix_path(base_path, fn)
-        file_ext = os.path.splitext(fn)[1]
+        fn, file_ext = os.path.splitext(fn)
         if file_ext in ('.c', ):
-            rtusrcode.append('file%d=%s' % (len(rtusrcode) + 1, remote_file))
-            #linux_programs.append('file%d=%s' % (len(linux_programs) + 1, remote_file))
+            if 'Realtime' in remote_file:
+                rtusrcode.append('file%d=%s' % (len(rtusrcode) + 1, remote_file))
+            else:
+                linux_programs.append('file%d=%s' % (len(linux_programs) + 1, remote_file))
             makefile_paths.add(os.path.split(local_file)[0])
         elif file_ext in ('.h', ):
             # Don't add it to the project ini file
             pass
         else:
-            pmac_programs.append('file%d=%s' % (len(pmac_programs) + 1, remote_file))
+            if fn not in ('pre_make', 'post_make', 'load_delay'):
+                pmac_programs.append('file%d=%s' % (len(pmac_programs) + 1, remote_file))
 
     for path in makefile_paths:
         print('Creating makefile in', path)
@@ -183,8 +187,8 @@ def output_config(base_path, project_files, release=True):
     pmac_programs.append('last_file_number=%d' % i)
     pmac_programs = '\n'.join(pmac_programs)
     linux_programs = '\n'.join(linux_programs)
-    #rtusrcode = '\n'.join(rtusrcode)
-    rtusrcode = ''
+    rtusrcode = '\n'.join(rtusrcode)
+    # rtusrcode = ''
     custom_config_file = ''
 
     print('Configuration in', local_cfg)
