@@ -1,0 +1,90 @@
+Install ELDK:
+    download ppc-2008-04-01_amcc.iso
+    mount -o loop *.iso install_cd
+
+    cd install_cd
+    ./install -d ~/ppmac/eldk ppc_4xxFP
+
+Make eldk environment:
+
+    $ source ~/ppmac/eldk/env.sh
+    $ cat ~/ppmac/eldk/env.sh
+    export ARCH=powerpc
+    export CROSS_COMPILE=ppc_4xxFP-
+    export DEPMOD=~/ppmac/eldk/usr/bin/depmod.pl
+    export PATH=~/ppmac/eldk/usr/bin:~/ppmac/eldk/bin:/usr/lib/lightdm/lightdm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+Copied windows ELDK version of the kernel (with whatever patches were applied,
+no need to rebuild it), prepared it with xenomai to fix the soft links:
+
+    Used 7-zip to compress the 
+    C:\suite_install_path\powerpc-460-linux-gnu\opt\eldk-4.2\debian_rootfs\usr\src\linux-2.6.30.3-xeno-2.5.6
+    directory to linux-2.6.30.3-xeno-2.5.6.7z
+
+    7zr x linux-2.6.30.3-xeno-2.5.6.7z
+    ln -s linux-2.6.30.3-xeno-2.5.6 linux
+    cd linux
+
+    # remove the windows softlinks (.lnk files)
+    find . |grep \.lnk$ | xargs rm
+    cd ..
+    tar xfvj xenomai-2.5.6.tar.bz2
+    cd xenomai-*
+
+    # create the proper linux softlinks
+    sh scripts/prepare-kernel.sh --linux=../linux --arch=powerpc
+
+    # symlinks should be created then:
+    find ../linux/ -type l
+
+    cd ../linux
+    source ~/ppmac/eldk/env.sh
+
+    # just rebuild the scripts directory for the necessary utilities
+    make scripts
+
+kernel module builds with this makefile:
+
+ARCH=powerpc
+PPMAC_ROOT=~/ppmac
+PATH=$(PPMAC_ROOT)/eldk/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+CROSS_COMPILE=ppc_4xxFP-
+KDIR=$(PPMAC_ROOT)/src/linux
+KSRC=$(PPMAC_ROOT)/src/linux
+CC=$(CROSS_COMPILE)gcc
+AS=$(CROSS_COMPILE)as
+STRIP=$(CROSS_COMPILE)strip
+INCLUDE=/opt/eldk-4.2/debian_PPMAC_ROOTfs/usr/include
+RTPMACINCLUDEDIR=$(PPMAC_ROOT)/src/dtlibs/rtpmac
+LIBPPMACINCLUDEDIR=$(PPMAC_ROOT)/src/dtlibs/libppmac
+export ARCH
+export CROSS_COMPILE
+
+OBJS     := ${patsubst %, %.o, $(MODULES)}
+CLEANMOD := ${patsubst %, .%*, $(MODULES)}
+PWD      := $(shell if [ "$$PWD" != "" ]; then echo $$PWD; else pwd; fi)
+
+
+obj-m   += usralgo.o
+usralgo-objs := usralgomain.o usrcode.o
+
+EXTRA_CFLAGS :=   -O2 -DCONFIG_460EX -D_GNU_SOURCE -D_REENTRANT -D__XENO__  -mhard-float -I$(RTPMACINCLUDEDIR) -I$(LIBPPMACINCLUDEDIR) -I$(KSRC)/include/xenomai -I$(KSRC)/include -I$(KSRC)/include/xenomai/posix -I$(INCLUDE) $(ADD_CFLAGS)
+KBUILD_EXTRA_SYMBOLS := $(LIBPPMACINCLUDEDIR)/Module.symvers
+
+%.o: %.S
+    $(CC)  -D__KERNEL__ -x c -E $< -o $*.i
+    $(AS)  -mbooke -o $@ $*.i
+
+all::
+    $(MAKE) -C $(KSRC) SUBDIRS=$(PWD) modules
+
+modules:
+    @echo "$(CFLAGS)"
+
+clean::
+    $(RM) *.o .*.o.d .*.o.cmd *.ko
+    $(RM) -R .tmp*
+    $(RM) .runinfo
+    rm -rf .*.cmd *.o *.ko *.mod.c *.i *.so Module.symvers modules.order
+
+
