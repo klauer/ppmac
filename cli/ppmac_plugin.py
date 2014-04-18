@@ -199,6 +199,20 @@ class PpmacCore(Configurable):
                 logger.error('Not connected')
         return (self.comm is not None)
 
+    def get_verbose(self, var):
+        """
+        Get the gpascii variable, print the information
+        """
+        value = self.comm.gpascii.get_variable(var)
+        print('%s=%s' % (var, value))
+
+    def set_verbose(self, var, value):
+        """
+        Set and then get the gpascii variable
+        """
+        self.comm.gpascii.set_variable(var, value)
+        print('%s=%s' % (var, self.comm.gpascii.get_variable(var)))
+
     @magic_arguments()
     @argument('cmd', nargs='+', type=unicode,
               help='Command to send')
@@ -242,7 +256,7 @@ class PpmacCore(Configurable):
             return
 
         try:
-            print('%s=%s' % (args.variable, self.comm.gpascii.get_variable(args.variable)))
+            self.get_verbose(args.variable)
         except GPError as ex:
             print(ex)
 
@@ -259,8 +273,7 @@ class PpmacCore(Configurable):
             return
 
         try:
-            set_result = self.comm.gpascii.set_variable(args.variable, args.value)
-            print('%s=%s' % (args.variable, set_result))
+            self.set_verbose(args.variable, args.value)
         except GPError as ex:
             print(ex)
 
@@ -269,11 +282,11 @@ class PpmacCore(Configurable):
               help='Variable to get/set')
     @argument('value', type=unicode, nargs='?',
               help='Optionally set a value')
-    def v(self, magic_args, arg):
+    def var(self, magic_args, arg):
         if not self.check_comm():
             return
 
-        args = parse_argstring(self.v, arg)
+        args = parse_argstring(self.var, arg)
 
         if not args:
             return
@@ -285,11 +298,63 @@ class PpmacCore(Configurable):
 
         try:
             if value is None:
-                print('%s=%s' % (var, self.comm.gpascii.get_variable(var)))
+                self.get_verbose(var)
             else:
-                print('%s=%s' % (var, self.comm.gpascii.set_variable(var, value)))
+                self.set_verbose(var, value)
         except GPError as ex:
             print(ex)
+
+    v = var
+
+    @magic_arguments()
+    @argument('pattern', type=unicode,
+              help='Variable pattern')
+    @argument('low', type=int,
+              help='Low number')
+    @argument('high', type=int,
+              help='High number (inclusive)')
+    def vars(self, magic_args, arg):
+        """
+        List sequential variable values
+
+        >> vars motor[%d].servoctrl 0 10
+        motor[0].servoctrl=0
+        motor[1].servoctrl=0
+        ...
+        motor[10].servoctrl=0
+
+        >> %vars motor[%d].servoctrl=1 0 10
+        motor[0].servoctrl=1
+        motor[1].servoctrl=1
+        ...
+        motor[10].servoctrl=1
+        """
+        if not self.check_comm():
+            return
+
+        args = parse_argstring(self.vars, arg)
+
+        if not args:
+            return
+
+        if '%' not in args.pattern:
+            print('%d must be in the pattern')
+            return
+
+        if '=' in args.pattern:
+            pattern, value = args.pattern.split('=')[:2]
+        else:
+            pattern, value = args.pattern, None
+
+        for i in range(args.low, args.high + 1):
+            var = pattern % i
+            try:
+                if value is None:
+                    self.get_verbose(var)
+                else:
+                    self.set_verbose(var, value)
+            except GPError as ex:
+                print(ex)
 
     @PpmacExport
     def shell_cmd(self, command):
@@ -911,13 +976,6 @@ class PpmacCore(Configurable):
         v2 = 'EncTable[%d].index2' % args.num
         for var, value in zip((v1, v2), (i1, i2)):
             self.set_verbose(var, value)
-
-    def set_verbose(self, var, value):
-        """
-        Set and then get the gpascii variable
-        """
-        self.comm.gpascii.set_variable(var, value)
-        print('%s = %s' % (var, self.comm.gpascii.get_variable(var)))
 
     @magic_arguments()
     @argument('-d', '--disable', default=False, action='store_true',
