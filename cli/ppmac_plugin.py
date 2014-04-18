@@ -39,6 +39,7 @@ MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 UTIL_PATH = '/var/ftp/usrflash'
 
+
 # Extension Initialization #
 def load_ipython_extension(ipython):
     if PpmacCore.instance is not None:
@@ -1030,9 +1031,9 @@ class PpmacCore(Configurable):
         """
         Enable user phase for motor(s)
 
-        1. Optionally unloads module
-        2. Optionally uploads a locally compiled module
-        3. Disables the motor phase control for all motors
+        1. Disables the motor phase control for all motors
+        2. Optionally unloads module
+        3. Optionally uploads a locally compiled module
         4. Inserts the kernel module
         5. Sets the phase function address for each motor (via userphase util)
         6. Enables the motor phase control for all motors
@@ -1041,14 +1042,6 @@ class PpmacCore(Configurable):
 
         if not args or not self.check_comm():
             return
-
-        if args.unload:
-            print('- Unloading the kernel module')
-            self.comm.shell_command('rmmod %s' % args.remote_module, verbose=True)
-
-        if args.upload:
-            print('- Uploading the kernel module (%s)' % args.upload)
-            self.comm.send_file(args.upload, args.remote_module)
 
         def set_phase(value):
             """
@@ -1063,6 +1056,14 @@ class PpmacCore(Configurable):
                 self.set_verbose('Motor[%d].PhaseCtrl' % motor, value)
 
         set_phase(0)
+
+        if args.unload:
+            print('- Unloading the kernel module')
+            self.comm.shell_command('rmmod %s' % args.remote_module, verbose=True)
+
+        if args.upload:
+            print('- Uploading the kernel module (%s)' % args.upload)
+            self.comm.send_file(args.upload, args.remote_module)
 
         print()
         print('- Inserting the kernel module')
