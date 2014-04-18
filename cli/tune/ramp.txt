@@ -1,4 +1,3 @@
-#%(motor1)dk
 &%(coord_sys)da
 open prog%(prog)d close
 
