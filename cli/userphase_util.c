@@ -1,97 +1,105 @@
 #include <stdio.h>
 #include <gplib.h>
 
-struct SHM *pshm=NULL;
+extern struct SHM *pshm;
 
-unsigned int find_isr_function( const char *functionName )
+bool find_isr_function(const char *functionName, unsigned long *addr)
 {
     FILE *fp;
     char *tail;
     char cmd[64];
     char result[128];
-    unsigned long addr = 0x00;
-
-    if( !functionName ) {
+    
+    
+    if (!functionName) {
         printf("function_name not specified\n");
-        return 1;
+        return false;
     }
-    if( !pshm ) {
+    if (!pshm) {
         printf("shm not initialized\n");
-        return 1;
+        return false;
     }
 
-    strcpy(cmd, "cat /proc/kallsyms | grep ");
+    strcpy(cmd, "cat /proc/kallsyms | grep -w ");
     strcat(cmd, functionName);
 
     fp = popen(cmd, "r");
-    if( !fp ) {
+    if (!fp) {
         printf("Unable to open cat\n");
-        return 1;
+        return false;
     }
 
-    while( fgets(result, 127, fp) ) {
+    while(fgets(result, 127, fp)) {
     }
 
     pclose(fp);
 
     // if result == cmd, we didn't get a response
-    if( strcmp(result, cmd) == 0 ) {
+    if (strcmp(result, cmd) == 0) {
         printf("Address not found (no response)\n");
-        return 1;
+        return false;
     }
 
     tail = strchr(result, ' ');
-    addr = strtoul(&result[0], &tail, 16);
-    if (addr == 0) {
+    *addr = strtoul(&result[0], &tail, 16);
+    if ((*addr) == 0) {
         printf("Address not found\n");
     }
-
-    return addr;
+    
+    return ((*addr) != 0);
 }
 
-int disable_isr( unsigned char isr )
+bool disable_isr(unsigned char isr)
 {
-    struct timespec time = { .tv_sec = 0, .tv_nsec = 10000000 };
+    struct timespec time;
+    
+    time.tv_sec = 0;
+    time.tv_nsec = 10000000;
 
-    if( !pshm ) {
+    if (!pshm) {
         printf("Disable ISR failed pshm==NULL\n");
-        return 1;
+        return false;
     }
+
     pshm->Motor[isr].PhaseCtrl = 0;  // stop executing user phase interrupt
     nanosleep(&time, NULL);          // wait 10ms (arbitrary) for ISR to stop executing
-
-    return 0;
+    return true;
 }
 
-int enable_isr( unsigned char isr )
+bool enable_isr(unsigned char isr)
 {
-    if( !pshm ) return 1;
+    if (!pshm)
+        return false;
 
     pshm->Motor[isr].PhaseCtrl = 1;  // start executing phase code
 
-    return 0;
+    return true;
 }
 
-int load_isr_function_from_addr( unsigned int addr, unsigned char isr )
+bool load_isr_function_from_addr(unsigned long addr, unsigned char isr)
 {
     // no need to validate ISR because maximum value of unsigned char is 255
 
-    if( disable_isr(isr) ) return 1;
+    if (!disable_isr(isr))
+        return false;
 
     pshm->Motor[isr].UserPhase = (PUserCtrl) addr;
     pshm->UserAlgo.PhaseAddr[isr] = addr;
     printf("Loaded OK\n");
-    return 0;
+    return true;
 }
 
-int load_isr_function( const char *functionName, unsigned char isr )
+int load_isr_function(const char *functionName, unsigned char isr)
 {
-    if( !functionName || functionName[0] == '\0' ) return 1;
-    unsigned int addr = find_isr_function(functionName);
-    if( addr == 0x00 )
-        return 1;
+    unsigned long addr;
 
-    printf("Got address to %s: %x\n", functionName, addr);
+    if (!functionName || functionName[0] == '\0')
+        return false;
+
+    if (!find_isr_function(functionName, &addr))
+        return false;
+
+    printf("Got address to %s: %lx\n", functionName, addr);
     return load_isr_function_from_addr(addr, isr);
 }
 
@@ -101,7 +109,7 @@ int main(int argc, char *argv[])
     int err;
     unsigned char motor;
     char *function_name;
-    unsigned int addr;
+    unsigned long addr;
 
     if (argc < 3) {
         goto printusage;
@@ -124,21 +132,23 @@ int main(int argc, char *argv[])
         function_name = argv[3];
         if (function_name[0] == '$' && strlen(function_name) > 1) {
             addr = (int)strtol(&function_name[1], NULL, 16);
-            printf("Address: %x\n", addr);
+            printf("Address: %lx\n", addr);
             err = load_isr_function_from_addr(addr, motor);
-            printf("Load ISR function from addr returned: %d\n", err);
         } else {
             printf("Function name: %s\n", function_name);
             err = load_isr_function(function_name, motor);
-            printf("Load ISR function returned: %d\n", err);
         }
+        if (!err)
+            printf("Load ISR function from addr failed\n");
 
     } else if (!strcmp(argv[1], "-e")) {
-        err = enable_isr(motor);
-        printf("Enable ISR returned: %d\n", err);
+        if (!(err = enable_isr(motor))) {
+            printf("Enable ISR returned: %d\n", err);
+        }
     } else if (!strcmp(argv[1], "-d")) {
-        err = disable_isr(motor);
-        printf("Disable ISR returned: %d\n", err);
+        if (!(err = disable_isr(motor))) {
+            printf("Disable ISR failed\n");
+        }
     } else {
         goto printusage;
     }
@@ -156,6 +166,6 @@ printusage:
     if (initialized)
         CloseLibrary();
 
-    return 1;
+    return 0;
 
 }

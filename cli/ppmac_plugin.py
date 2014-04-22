@@ -613,6 +613,10 @@ class PpmacCore(Configurable):
               help='Scale data on the left axis by this')
     @argument('-R', '--right-scale', type=float, default=1.0,
               help='Scale data on the right axis by this')
+    @argument('-z', '--zero', action='store_true',
+              help='First data point is zero (relative mode)')
+    @argument('-m', '--limits', action='store_true',
+              help='Set same limits on both Y axes')
     def gather_plot(self, magic_args, arg):
         """
         Plot the most recent gather data
@@ -675,11 +679,30 @@ class PpmacCore(Configurable):
         for index in right_indices:
             data[:, index] *= args.right_scale
 
-        tune.plot_custom(addresses, data, x_index=x_index,
-                         left_indices=left_indices,
-                         right_indices=right_indices,
-                         left_label=', '.join('%s' % arg for arg in args.left),
-                         right_label=', '.join('%s' % arg for arg in args.right))
+        if args.zero:
+            for index in range(data.shape[1]):
+                data[:, index] -= data[0, index]
+
+        def make_label(items):
+            if items:
+                return ', '.join('%s' % item for item in items)
+
+        ax1, ax2 = tune.plot_custom(addresses, data, x_index=x_index,
+                                    left_indices=left_indices,
+                                    right_indices=right_indices,
+                                    left_label=make_label(args.left),
+                                    right_label=make_label(args.right))
+
+        if args.limits:
+            ly1, ly2 = ax1.get_ylim()
+            ry1, ry2 = ax2.get_ylim()
+
+            y1 = min(ly1, ry1)
+            y2 = max(ly2, ry2)
+
+            ax1.set_ylim(y1, y2)
+            ax2.set_ylim(y1, y2)
+
         plt.show()
 
     @magic_arguments()
@@ -1079,7 +1102,7 @@ class PpmacCore(Configurable):
         if not self.comm.file_exists(prog_path):
             print('Building userphase utility (from userphase_util.c)')
             build_utility(self.comm, ['userphase_util.c'], 'userphase',
-                          dest_path=UTIL_PATH)
+                          dest_path=UTIL_PATH, verbose=True)
             print('Done.')
 
         print()

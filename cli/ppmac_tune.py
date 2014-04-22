@@ -274,7 +274,8 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
     fig, ax1 = plt.subplots()
     if left_indices:
         for idx, color in zip(left_indices, left_colors):
-            ax1.plot(x_axis, data[:, idx], color, label=columns[idx])
+            ax1.plot(x_axis, data[:, idx], color, label=columns[idx],
+                     alpha=0.7)
         ax1.set_xlabel(xlabel)
         ax1.set_ylabel(left_label)
         for tl in ax1.get_yticklabels():

@@ -450,10 +450,16 @@ class PPComm(object):
         """
         stdin, stdout, stderr = self._client.exec_command(command, **kwargs)
 
+        def output_lines():
+            for line in stdout.readlines():
+                yield line
+            for line in stderr.readlines():
+                yield line
+
         if verbose:
             ret = []
             remove_matching = PPMAC_MESSAGES
-            for line in stdout.readlines():
+            for line in output_lines():
                 skip = False
                 for regex in remove_matching:
                     m = regex.match(line)

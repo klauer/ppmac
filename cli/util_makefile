@@ -8,7 +8,7 @@ PROG = %(output_name)s
 
 # Cross compiler toolchain
 ARCH=powerpc
-CC=gcc
+CC=g++
 
 INCLUDE := -I$(PWD) -I/opt/ppmac/libppmac -I/opt/ppmac/rtpmac
 		   
