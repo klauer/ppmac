@@ -14,6 +14,10 @@ Make eldk environment:
     export DEPMOD=~/ppmac/eldk/usr/bin/depmod.pl
     export PATH=~/ppmac/eldk/usr/bin:~/ppmac/eldk/bin:/usr/lib/lightdm/lightdm:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
+Copy libppmac, rtpmac from Power PMAC itself (**NOT** the IDE distribution!)
+    scp -r deltatau@ppmac_ip:/opt/ppmac/libppmac $(PPMAC_ROOT)/src/dtlibs
+    scp -r deltatau@ppmac_ip:/opt/ppmac/rtpmac $(PPMAC_ROOT)/src/dtlibs
+
 Copied windows ELDK version of the kernel (with whatever patches were applied,
 no need to rebuild it), prepared it with xenomai to fix the soft links:
 
@@ -54,7 +58,7 @@ KSRC=$(PPMAC_ROOT)/src/linux
 CC=$(CROSS_COMPILE)gcc
 AS=$(CROSS_COMPILE)as
 STRIP=$(CROSS_COMPILE)strip
-INCLUDE=/opt/eldk-4.2/debian_PPMAC_ROOTfs/usr/include
+INCLUDE=$(PPMAC_ROOT)/eldk/ppc_4xxFP-/usr/include
 RTPMACINCLUDEDIR=$(PPMAC_ROOT)/src/dtlibs/rtpmac
 LIBPPMACINCLUDEDIR=$(PPMAC_ROOT)/src/dtlibs/libppmac
 export ARCH
