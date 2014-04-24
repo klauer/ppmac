@@ -13,7 +13,6 @@ from __future__ import print_function
 import logging
 import os
 import sys
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -156,6 +155,11 @@ class PpmacCore(Configurable):
             self.shell.user_ns['ppmac'] = c
             print('Completer loaded into namespace. Try ppmac.[tab]')
 
+    @property
+    def _gpascii(self):
+        if self.check_comm():
+            return self.comm.gpascii
+
     @magic_arguments()
     @argument('-h', '--host', type=str, help='Power PMAC host IP')
     @argument('-P', '--port', type=int, help='Power PMAC SSH port')
@@ -204,15 +208,15 @@ class PpmacCore(Configurable):
         """
         Get the gpascii variable, print the information
         """
-        value = self.comm.gpascii.get_variable(var)
+        value = self._gpascii.get_variable(var)
         print('%s=%s' % (var, value))
 
     def set_verbose(self, var, value):
         """
         Set and then get the gpascii variable
         """
-        self.comm.gpascii.set_variable(var, value)
-        print('%s=%s' % (var, self.comm.gpascii.get_variable(var)))
+        self._gpascii.set_variable(var, value)
+        print('%s=%s' % (var, self._gpascii.get_variable(var)))
 
     @magic_arguments()
     @argument('cmd', nargs='+', type=unicode,
@@ -232,16 +236,17 @@ class PpmacCore(Configurable):
         if not args:
             return
 
-        gpascii = self.comm.gpascii_channel()
-        line = ' '.join(args.cmd)
-        gpascii.send_line(line)
-        try:
-            for line in gpascii.read_timeout(timeout=args.timeout):
-                if line:
-                    print(line)
+        gpascii = self.comm.gpascii
+        with gpascii.lock:
+            line = ' '.join(args.cmd)
+            gpascii.send_line(line)
+            try:
+                for line in gpascii.read_timeout(timeout=args.timeout):
+                    if line:
+                        print(line)
 
-        except (KeyboardInterrupt, TimeoutError):
-            pass
+            except (KeyboardInterrupt, TimeoutError):
+                pass
 
     g = gpascii
 
@@ -388,7 +393,7 @@ class PpmacCore(Configurable):
 
         def get_values(var, type_=float):
             var = 'Motor[%%d].%s' % var
-            return [self.comm.gpascii.get_variable(var % i, type_=type_)
+            return [self._gpascii.get_variable(var % i, type_=type_)
                     for i in range_]
 
         act_pos = get_values('ActPos')
@@ -403,7 +408,7 @@ class PpmacCore(Configurable):
         if not self.check_comm():
             return self.default_servo_period
 
-        return self.comm.gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
+        return self._gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
 
     @magic_arguments()
     @argument('duration', default=1.0, type=float,
@@ -768,6 +773,36 @@ class PpmacCore(Configurable):
         self.custom_tune('ramp.txt', args)
 
     @magic_arguments()
+    @argument('script', type=str,
+              help='Script name')
+    @argument('motor1', default=1, type=int,
+              help='Motor number')
+    @argument('distance', default=1.0, type=float,
+              help='Move distance (motor units)')
+    @argument('velocity', default=1.0, type=float,
+              help='Velocity (motor units/s)')
+    @argument('iterations', default=1, type=int, nargs='?',
+              help='Repetitions')
+    @argument('-k', '--kill', dest='kill_after', action='store_true',
+              help='Kill the motor after the move')
+    @argument('-a', '--accel', default=1.0, type=float,
+              help='Set acceleration time (mu/ms^2)')
+    @argument('-d', '--dwell', default=1.0, type=float,
+              help='Dwell time (ms)')
+    @argument('-g', '--gather', type=unicode, nargs='*',
+              help='Gather additional addresses during move')
+    def ctune(self, magic_args, arg):
+        """
+        Run custom tuning script in tune/{script}
+        """
+        args = parse_argstring(self.ctune, arg)
+
+        if not args:
+            return
+
+        self.custom_tune(args.script, args)
+
+    @magic_arguments()
     @argument('script', default='ramp.txt', type=unicode,
               help='Tuning script to use (e.g., ramp.txt)')
     @argument('motor1', default=1, type=int,
@@ -892,7 +927,7 @@ class PpmacCore(Configurable):
             return
 
         search_text = ' '.join(args.text).lower()
-        for obj, value in tune.get_settings(self.comm.gpascii, args.motor,
+        for obj, value in tune.get_settings(self._gpascii, args.motor,
                                             completer=self.completer):
             if isinstance(obj, completer.PPCompleterNode):
                 try:
@@ -928,7 +963,7 @@ class PpmacCore(Configurable):
             logger.error('Destination motor should be different from source motor')
             return
 
-        tune.copy_settings(self.comm.gpascii, args.motor_from, args.motor_to,
+        tune.copy_settings(self._gpascii, args.motor_from, args.motor_to,
                            completer=self.completer)
 
     @magic_arguments()
@@ -1120,11 +1155,25 @@ class PpmacCore(Configurable):
               help='Program number')
     @argument('variables', nargs='*', type=unicode,
               help='Variables to monitor while running')
+    @argument('-f', '--filename', nargs='?', type=unicode,
+              help='Local script filename')
+    @argument('-m', '--motors', nargs='*', type=unicode,
+              help='Motor assignment')
     def prog_run(self, magic_self, arg):
         """
         Run a motion program in a coordinate system.
 
         Optionally monitor variables (at a low rate) during execution
+
+        If filename is specified, the local script is first uploaded
+        before running
+
+        Motors can be specified in the form of
+                (coordinate system axis X/Y/Z/etc)=(motor number)
+        If specified, the coordinate system will be cleared first and
+        all motors reassigned.
+
+        >> prog_run 10 1
         """
         args = parse_argstring(self.prog_run, arg)
 
@@ -1132,87 +1181,42 @@ class PpmacCore(Configurable):
             return
 
         gpascii = self.comm.gpascii_channel()
+        gpascii.send_line('&%dabort' % (args.coord, ))
+
+        if args.filename:
+            print('Sending script: %s' % args.filename)
+            lines = open(args.filename, 'rt').readlines()
+            opening_lines = ['close all buffers',
+                             'open prog %d' % args.program]
+            closing_lines = ['close']
+
+            for line in opening_lines + lines + closing_lines:
+                if line.rstrip():
+                    print(line.rstrip())
+                try:
+                    gpascii.send_line(line.strip())
+                except GPError as ex:
+                    print('Failed to send script: %s' % ex)
+                    return
+
+            gpascii.sync()
+
+        if args.motors:
+            coord = {}
+            for m in args.motors:
+                axis, motor = m.split('=', 1)
+                motor = int(motor)
+                coord[motor] = axis
+            coord = {args.coord: coord}
+            gpascii.set_coords(coord, verbose=True, undefine=True)
+
         try:
-            gpascii.program(args.coord, args.program, start=True)
+            gpascii.run_and_wait(args.coord, args.program, variables=args.variables)
         except GPError as ex:
             print(ex)
             if 'READY TO RUN' in str(ex):
                 print('Are all motors in the coordinate system in closed loop?')
             return
-
-        time.sleep(0.1)
-
-        print('Coord %d Program %d' % (args.coord, args.program))
-        active_var = 'Coord[%d].ProgActive' % args.program
-
-        def get_active():
-            return gpascii.get_variable(active_var, type_=int)
-
-        last_values = [gpascii.get_variable(var)
-                       for var in args.variables]
-
-        for var, value in zip(args.variables, last_values):
-            print('%s = %s' % (var, value))
-
-        try:
-            while get_active():
-                if not args.variables:
-                    time.sleep(0.1)
-                else:
-                    values = [gpascii.get_variable(var)
-                              for var in args.variables]
-                    for var, old_value, new_value in zip(args.variables,
-                                                         last_values, values):
-                        if old_value != new_value:
-                            print('%s = %s' % (var, new_value))
-
-                    last_values = values
-
-        except KeyboardInterrupt:
-            if get_active():
-                print("Aborting...")
-                gpascii.program(args.coord, args.program, stop=True)
-
-        print('Done (%s = %s)' % (active_var, get_active()))
-
-        error_status = 'Coord[%d].ErrorStatus' % args.coord
-        errno = gpascii.get_variable(error_status, type_=int)
-
-        if errno in const.coord_errors:
-            print('Error: (%s) %s' % (const.coord_errors[errno]))
-
-    @magic_arguments()
-    @argument('script', type=str,
-              help='Motion program filename')
-    @argument('motors', nargs='*', type=unicode,
-              help='In the form X=1')
-    @argument('-c', '--coord', type=int, default=0,
-              help='Coordinate system')
-    @argument('-p', '--program', type=int, default=999,
-              help='Program number')
-    @argument('-r', '--run', action='store_true',
-              help='Run the uploaded program')
-    @argument('-g', '--gather', action='store_true',
-              help='Use gather')
-    def prog_send(self, magic_self, arg):
-        """
-        Send and optionally run a motion program.
-
-        If gather mode is enabled, the program will be run and the gather
-        data will be read.
-
-        Motors are in the form of
-                (coordinate system axis)=(motor number)
-        If any motors are specified, the coordinate system will be cleared
-        first and reassigned.
-
-        """
-        args = parse_argstring(self.prog_send, arg)
-
-        if not args or not self.check_comm():
-            return
-
-        ## TODO
 
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,
@@ -1226,7 +1230,7 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        monitor_variables(args.variables)
+        self._gpascii.monitor_variables(args.variables)
 
     @magic_arguments()
     @argument('base', type=unicode,
@@ -1238,8 +1242,8 @@ class PpmacCore(Configurable):
         Low-speed (compared to gather) monitoring of variables
         using the completer.
 
-        >>> monitorc Motor[1]
-            monitors PosSf, Pos, etc.
+        >> monitorc Motor[1]
+           monitors PosSf, Pos, etc.
         '''
         args = parse_argstring(self.monitorc, arg)
 
@@ -1260,7 +1264,8 @@ class PpmacCore(Configurable):
                 variables.remove(ignore)
 
         print('Initial values:')
-        last_values = get_var_values(self.comm, variables)
+        gpascii = self.comm.gpascii
+        last_values = gpascii.get_variables(variables)
         for var, value in zip(variables, last_values):
             print('%s = %s' % (var, value))
 
@@ -1271,7 +1276,7 @@ class PpmacCore(Configurable):
 
         try:
             while True:
-                values = get_var_values(self.comm, variables)
+                values = gpascii.get_variables(variables)
                 for var, old_value, new_value in zip(variables,
                                                      last_values, values):
                     if old_value != new_value:
@@ -1348,9 +1353,9 @@ class PpmacCore(Configurable):
             return ret
 
         if args.monitor:
-            monitor_variables(variables, comm=self.comm, change_callback=got_value)
+            self._gpascii.monitor_variables(variables, change_callback=got_value)
         else:
-            print_var_values(self.comm, variables, cb=got_value)
+            self._gpascii.print_variables(variables, cb=got_value)
 
     @magic_arguments()
     @argument('coord', default=1, type=int,
@@ -1411,9 +1416,9 @@ class PpmacCore(Configurable):
             return ret
 
         if args.monitor:
-            monitor_variables(variables, comm=self.comm, change_callback=got_value)
+            self._gpascii.monitor_variables(variables, change_callback=got_value)
         else:
-            print_var_values(self.comm, variables, cb=got_value)
+            self._gpascii.print_variables(variables, cb=got_value)
 
 
 @PpmacExport
@@ -1464,82 +1469,3 @@ def build_utility(comm, source_files, output_name,
         run = ' '.join(run)
         comm.shell_command('%s %s' % (output_name, run),
                            timeout=None, verbose=True)
-
-
-def get_var_values(comm, vars_, cb=None):
-    ret = []
-    for var in vars_:
-        try:
-            value = comm.gpascii.get_variable(var)
-        except (GPError, TimeoutError) as ex:
-            ret.append('Error: %s' % (ex, ))
-        else:
-            if cb is not None:
-                try:
-                    value = cb(var, value)
-                except:
-                    pass
-
-            ret.append(value)
-    return ret
-
-
-def print_var_values(comm, vars, cb=None, f=sys.stdout):
-    values = get_var_values(comm, vars, cb=cb)
-
-    for var, value in zip(vars, values):
-        if value is not None:
-            print('%s = %s' % (var, value), file=f)
-
-    return values
-
-
-@PpmacExport
-def monitor_variables(variables, f=sys.stdout, comm=None,
-                      change_callback=None, show_change_set=False,
-                      show_initial=True):
-    if comm is None:
-        comm = PpmacCore.instance.comm
-        if comm is None:
-            raise ValueError('PpmacCore comm not connected')
-
-    change_set = set()
-    last_values = get_var_values(comm, variables, cb=change_callback)
-
-    if show_initial:
-        for var, value in zip(variables, last_values):
-            if value is not None:
-                print('%s = %s' % (var, value), file=f)
-
-    try:
-        while True:
-            values = get_var_values(comm, variables, cb=change_callback)
-            for var, old_value, new_value in zip(variables,
-                                                 last_values, values):
-                if new_value is None:
-                    continue
-
-                if old_value != new_value:
-                    print('%s = %s' % (var, new_value), file=f)
-                    change_set.add(var)
-
-            last_values = values
-
-    except KeyboardInterrupt:
-        if show_change_set and change_set:
-            print("Variables changed:", file=f)
-            for var in sorted(change_set):
-                print(var, file=f)
-
-
-@PpmacExport
-def print_variables(variables, f=sys.stdout, comm=None,
-                    value_callback=None):
-    if comm is None:
-        comm = PpmacCore.instance.comm
-        if comm is None:
-            raise ValueError('PpmacCore comm not connected')
-
-    values = get_var_values(comm, variables, cb=value_callback)
-    for var, value in zip(variables, values):
-        print('%s = %s' % (var, value), file=f)

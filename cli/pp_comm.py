@@ -1,11 +1,13 @@
 from __future__ import print_function
 import os
 import re
+import sys
 import time
 import logging
 import threading
 
 import paramiko
+import ppmac_const as const
 
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
 PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
@@ -260,6 +262,39 @@ class GpasciiChannel(ShellChannel):
                     if var == vname.lower():
                         return type_(value)
 
+    def get_variables(self, variables, type_=str, timeout=0.2,
+                      cb=None, error_cb=None):
+        """
+        Get Power PMAC variables, typecasting them to type_
+
+        Optionally calls a callback per variable to modify its value
+
+        >> comm.get_variables(['i100', 'i200'], type_=int)
+        [0, 1]
+        >> comm.get_variables(['i100', 'i200'], type_=int,
+                              cb=lambda var, value: value + 1)
+        [1, 2]
+        """
+        ret = []
+        for var in variables:
+            try:
+                value = self.get_variable(var)
+            except (GPError, TimeoutError) as ex:
+                if error_cb is None:
+                    ret.append('Error: %s' % (ex, ))
+                else:
+                    ret.append(error_cb(var, ex))
+            else:
+                if cb is not None:
+                    try:
+                        value = cb(var, value)
+                    except:
+                        pass
+
+                ret.append(value)
+
+        return ret
+
     def kill_motor(self, motor):
         """
         Kill a specific motor
@@ -338,7 +373,8 @@ class GpasciiChannel(ShellChannel):
 
         return coords
 
-    def set_coords(self, coords, verbose=False):
+    def set_coords(self, coords, verbose=False, undefine=True,
+                   undefine_all=False):
         """
         Clear and then set all of the coordinate systems
         as in `coords`.
@@ -350,7 +386,6 @@ class GpasciiChannel(ShellChannel):
             coordinate system 2, motor 1 is X, motor 12 is Y
         """
         with self.lock:
-            self.send_line('undefine all')
             if not coords:
                 return
 
@@ -359,6 +394,18 @@ class GpasciiChannel(ShellChannel):
                 if verbose:
                     print('Increasing maxcoords to %d' % (max_coord + 1))
                 self.set_variable('sys.maxcoords', max_coord + 1)
+
+            if undefine_all:
+                # Undefine all coordinate systems
+                self.send_line('undefine all')
+            elif undefine:
+                # Undefine only the coordinate systems being set here
+                for coord in coords.keys():
+                    self.send_line('&%dundefine' % (coord, ))
+
+            # Abort any running programs in coordinate systems
+            for coord in coords.keys():
+                self.send_line('&%dabort' % (coord, ))
 
             for coord, motors in coords.items():
                 for motor, assigned in motors.items():
@@ -397,6 +444,113 @@ class GpasciiChannel(ShellChannel):
         command = ''.join(command) % locals()
         self.send_line(command)
 
+    def run_and_wait(self, coord_sys, program, variables=[],
+                     active_var=None, verbose=True, change_callback=None):
+        """
+        Run a motion program in a coordinate system.
+
+        Optionally monitor variables (at a low rate) during execution
+
+        May raise GPError when running program if coordinate system/motors
+        are not ready
+
+        active_var: defaults to Coord[].ProgActive
+
+        returns: coordinate system error status
+        """
+        self.program(coord_sys, program, start=True)
+
+        if active_var is None:
+            active_var = 'Coord[%d].ProgActive' % program
+
+        if verbose:
+            print('Coord %d Program %d' % (coord_sys, program))
+
+        active_var = 'Coord[%d].ProgActive' % coord_sys
+
+        def get_active():
+            return self.get_variable(active_var, type_=int)
+
+        last_values = [self.get_variable(var)
+                       for var in variables]
+
+        for var, value in zip(variables, last_values):
+            print('%s = %s' % (var, value))
+
+        try:
+            while get_active():
+                if variables is None or not variables:
+                    time.sleep(0.1)
+                else:
+                    values = [self.get_variable(var)
+                              for var in variables]
+                    for var, old_value, new_value in zip(variables,
+                                                         last_values, values):
+                        if old_value != new_value:
+                            if verbose:
+                                print('%s = %s' % (var, new_value))
+                            if change_callback is not None:
+                                change_callback(var, old_value, new_value)
+
+                    last_values = values
+
+        except KeyboardInterrupt:
+            if get_active():
+                if verbose:
+                    print("Aborting...")
+                self.program(coord_sys, program, stop=True)
+
+        if verbose:
+            print('Done (%s = %s)' % (active_var, get_active()))
+
+        error_status = 'Coord[%d].ErrorStatus' % coord_sys
+        errno = self.get_variable(error_status, type_=int)
+
+        if errno in const.coord_errors and verbose:
+            print('Error: (%s) %s' % (const.coord_errors[errno]))
+
+        return errno
+
+    def monitor_variables(self, variables, f=sys.stdout,
+                          change_callback=None, show_change_set=False,
+                          show_initial=True):
+        change_set = set()
+        last_values = self.get_variables(variables, cb=change_callback)
+
+        if show_initial:
+            for var, value in zip(variables, last_values):
+                if value is not None:
+                    print('%s = %s' % (var, value), file=f)
+
+        try:
+            while True:
+                values = self.get_variables(variables, cb=change_callback)
+                for var, old_value, new_value in zip(variables,
+                                                     last_values, values):
+                    if new_value is None:
+                        continue
+
+                    if old_value != new_value:
+                        print('%s = %s' % (var, new_value), file=f)
+                        change_set.add(var)
+
+                last_values = values
+
+        except KeyboardInterrupt:
+            if show_change_set and change_set:
+                print("Variables changed:", file=f)
+                for var in sorted(change_set):
+                    print(var, file=f)
+
+    def print_variables(self, variables, cb=None, f=sys.stdout):
+        values = self.get_variables(variables, cb=cb)
+
+        for var, value in zip(variables, values):
+            if value is not None:
+                print('%s = %s' % (var, value), file=f)
+
+        return values
+
 
 class PPComm(object):
     """
@@ -427,10 +581,7 @@ class PPComm(object):
         Create a new gpascii channel -- an independent
         gpascii process running on the remote machine
         """
-        if cmd is not None:
-            return GpasciiChannel(self, cmd)
-        else:
-            return GpasciiChannel(self)
+        return GpasciiChannel(self, command=cmd)
 
     def gpascii_file(self, filename):
         """
