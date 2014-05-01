@@ -62,15 +62,16 @@ def _wait_for(generator, wait_pattern,
         if rstrip:
             line = line.rstrip()
 
+        if verbose:
+            print(line)
+
         if line == wait_pattern:
+            yield line, []
             break
 
         m = wait_re.match(line)
         if m is not None:
-            yield line, m
-
-        if verbose:
-            print(line)
+            yield line, m.groups()
 
         skip = False
         for regex in remove_matching:
@@ -96,7 +97,7 @@ class ShellChannel(object):
 
         self.send_line('/bin/bash --noediting')
         self.send_line('stty -echo')
-        self.wait_for('%s@.*' % comm._user)
+        self.wait_for('%s@.*' % comm._user, verbose=True)
 
         if command is not None:
             self.send_line(command)
@@ -117,11 +118,11 @@ class ShellChannel(object):
         with self.lock:
             gen = self.read_timeout(timeout, **kwargs)
             ret = []
-            for line, m in _wait_for(gen, wait_pattern,
-                                     verbose=verbose, remove_matching=remove_matching):
+            for line, groups in _wait_for(gen, wait_pattern,
+                                          verbose=verbose, remove_matching=remove_matching):
                 ret.append(line)
-                if m is not None:
-                    return ret, m.groups()
+                if groups is not None:
+                    return ret, groups
 
             return False
 
@@ -653,7 +654,7 @@ class PPComm(object):
 
         return self._sftp
 
-    def read_file(self, filename, timeout=5.0):
+    def read_file(self, filename):
         """
         Read a remote file, result is a list of lines
         """
@@ -698,7 +699,7 @@ class CoordinateSave(object):
     system setup
     """
     def __init__(self, comm, verbose=True):
-        self.channel = comm.gpascii_channel()
+        self.channel = comm.gpascii
         self.verbose = verbose
 
     def __enter__(self):

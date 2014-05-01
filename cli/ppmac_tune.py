@@ -30,7 +30,7 @@ OT_S_CURVE = 3
 logger = logging.getLogger('ppmac_tune')
 
 
-def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
+def custom_tune(gpascii, script_file, motor1=3, distance=0.01, velocity=0.01,
                 dwell=0.0, accel=1.0, scurve=0.0, prog=999, coord_sys=0,
                 gather=[], motor2=None, iterations=2, kill_after=False):
     """
@@ -64,16 +64,18 @@ def custom_tune(comm, script_file, motor1=3, distance=0.01, velocity=0.01,
     def killed(ex):
         pass
 
+    comm = gpascii._comm
+
     with pp_comm.CoordinateSave(comm, verbose=False):
         try:
-            return ppmac_gather.run_and_gather(comm, script, prog=prog,
+            return ppmac_gather.run_and_gather(gpascii, script, prog=prog,
                                                coord_sys=coord_sys,
                                                gather_vars=gather_vars,
                                                cancel_callback=killed)
         finally:
             if kill_after:
                 print('Killing motors')
-                comm.gpascii.kill_motors([motor1, motor2])
+                gpascii.kill_motors([motor1, motor2])
 
 
 def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):

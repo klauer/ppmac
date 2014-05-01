@@ -128,7 +128,7 @@ class PpmacCore(Configurable):
         db_file = self.completer_db_file
         c = None
         if self.comm is not None:
-            gpascii = self.comm.gpascii_channel()
+            gpascii = self.comm.gpascii
         else:
             gpascii = None
 
@@ -439,7 +439,7 @@ class PpmacCore(Configurable):
         if 'Sys.ServoCount.a' not in addr:
             addr.insert(0, 'Sys.ServoCount.a')
 
-        gather.gather_and_plot(self.comm, addr,
+        gather.gather_and_plot(self.comm.gpascii, addr,
                                duration=args.duration, period=args.period)
 
     def get_gather_results(self, settings_file=None, verbose=True):
@@ -519,12 +519,11 @@ class PpmacCore(Configurable):
         kwargs = dict((name, getattr(magic_args, name)) for name in args
                       if hasattr(magic_args, name))
 
-        gpascii = self.comm.gpascii_channel()
         if range_var is not None:
-            return tune.tune_range(gpascii, fn, range_var, range_values,
+            return tune.tune_range(self.comm.gpascii, fn, range_var, range_values,
                                    **kwargs)
         else:
-            return tune.custom_tune(self.comm, fn, **kwargs)
+            return tune.custom_tune(self.comm.gpascii, fn, **kwargs)
 
     @magic_arguments()
     @argument('filename', type=unicode, nargs='?',
@@ -1159,6 +1158,8 @@ class PpmacCore(Configurable):
               help='Local script filename')
     @argument('-m', '--motors', nargs='*', type=unicode,
               help='Motor assignment')
+    @argument('-M', '--macro', nargs='*', type=unicode,
+              help='Macros')
     def prog_run(self, magic_self, arg):
         """
         Run a motion program in a coordinate system.
@@ -1169,9 +1170,15 @@ class PpmacCore(Configurable):
         before running
 
         Motors can be specified in the form of
-                (coordinate system axis X/Y/Z/etc)=(motor number)
+            (coordinate system axis X/Y/Z/etc)=(motor number)
         If specified, the coordinate system will be cleared first and
         all motors reassigned.
+
+        Macros are specified in the form of:
+            variable=value
+
+        Prior to evaluating the script, macros in the script file in
+        the form of '$(variable)' will be replaced with 'value'
 
         >> prog_run 10 1
         """
@@ -1180,7 +1187,7 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        gpascii = self.comm.gpascii_channel()
+        gpascii = self.comm.gpascii
         gpascii.send_line('&%dabort' % (args.coord, ))
 
         if args.filename:
@@ -1190,7 +1197,18 @@ class PpmacCore(Configurable):
                              'open prog %d' % args.program]
             closing_lines = ['close']
 
-            for line in opening_lines + lines + closing_lines:
+            script = opening_lines + lines + closing_lines
+            if args.macro:
+                script = '\n'.join(script)
+                for macro in args.macro:
+                    variable, value = macro.split('=', 1)
+
+                    macro = '$(%s)' % variable
+                    script = script.replace(macro, value)
+
+                script = script.split('\n')
+
+            for line in script:
                 if line.rstrip():
                     print(line.rstrip())
                 try:
@@ -1207,6 +1225,9 @@ class PpmacCore(Configurable):
                 axis, motor = m.split('=', 1)
                 motor = int(motor)
                 coord[motor] = axis
+
+                # gpascii.send_line('&*#%d->0' % motor)
+
             coord = {args.coord: coord}
             gpascii.set_coords(coord, verbose=True, undefine=True)
 

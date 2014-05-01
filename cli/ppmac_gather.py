@@ -122,7 +122,9 @@ def parse_gather(addresses, lines):
     return data
 
 
-def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_file):
+def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
+    comm = gpascii._comm
+
     total_samples = get_sample_count(period, duration)
 
     settings = get_settings(addresses, duration=duration, period=period)
@@ -132,7 +134,6 @@ def gather(comm, addresses, duration=0.1, period=1, output_file=gather_output_fi
 
     comm.gpascii_file(gather_config_file)
 
-    gpascii = comm.gpascii_channel()
     max_lines = gpascii.get_variable('gather.maxlines', type_=int)
     if max_lines < total_samples:
         total_samples = max_lines
@@ -171,7 +172,7 @@ def get_gather_results(comm, addresses, output_file=gather_output_file):
     # -u is for upload
     comm.shell_command('gather %s -u' % (output_file, ))
 
-    data = comm.read_file(output_file, timeout=60.0)
+    data = comm.read_file(output_file)
     data = [line.strip() for line in data]
     return parse_gather(addresses, data)
 
@@ -182,11 +183,6 @@ def gather_data_to_file(fn, addr, data, delim='\t'):
         for line in data:
             line = ['%s' % s for s in line]
             print(delim.join(line), file=f)
-
-
-def gather_to_file(comm, addr, fn, delim='\t', **kwargs):
-    data = gather_to_file(comm, addr, **kwargs)
-    return gather_data_to_file(fn, addr, data, delim=delim)
 
 
 def plot(addr, data):
@@ -206,11 +202,11 @@ def plot(addr, data):
     plt.show()
 
 
-def gather_and_plot(comm, addr, duration=0.2, period=1):
-    servo_period = comm.gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
-    print('Servo period is', servo_period)
+def gather_and_plot(gpascii, addr, duration=0.2, period=1):
+    servo_period = gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
+    print('Servo period is %g (%g KHz)' % (servo_period, 1.0 / servo_period))
 
-    data = gather(comm, addr, duration=duration, period=period)
+    data = gather(gpascii, addr, duration=duration, period=period)
     gather_data_to_file('test.txt', addr, data)
     plot(addr, data)
 
@@ -335,7 +331,7 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
     print(exe, args)
 
 
-def run_and_gather(comm, script_text, prog=999, coord_sys=0,
+def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
                    gather_vars=[], period=1, samples=max_samples,
                    cancel_callback=None, check_active=False):
     """
@@ -348,7 +344,7 @@ def run_and_gather(comm, script_text, prog=999, coord_sys=0,
                                  'gather.enable=0'
                                  ])
 
-    gpascii = comm.gpascii_channel()
+    comm = gpascii._comm
     gpascii.set_variable('gather.enable', '0')
 
     gather_lower = [var.lower() for var in gather_vars]
@@ -431,7 +427,7 @@ def main():
     if 1:
         run_tune_program(comm, ramp_cmd)
     else:
-        gather_and_plot(comm, addr, duration=duration, period=period)
+        gather_and_plot(comm.gpascii, addr, duration=duration, period=period)
 
 
 if __name__ == '__main__':
