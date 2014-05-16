@@ -295,7 +295,6 @@ class GatherClient(TCPSocket):
         for i in range(samples):
             ret.append(data[j:j + n_items])
             j += n_items
-            print(ret[-1])
 
         return ret
 
@@ -315,10 +314,15 @@ def test(host='10.0.0.98', port=2332):
     print('elapsed %.2fms' % (t1 * 1000))
 
     if cols:
-        time_ = cols[0]
+        import numpy as np
         import matplotlib.pyplot as plt
+        x_axis = np.array(cols[0])
+        x_axis -= x_axis[0]
+
         for i, col in enumerate(cols[1:]):
-            plt.plot(time_, col, label='Addr %d' % (i + 1))
+            col = np.array(col)
+            col -= np.min(col)
+            plt.plot(x_axis, col, label='Addr %d' % (i + 1))
         plt.legend(loc='best')
         plt.show()
 
