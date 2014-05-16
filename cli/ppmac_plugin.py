@@ -1061,7 +1061,7 @@ class PpmacCore(Configurable):
               default='/var/ftp/usrflash',
               help='Destination path for files')
     @argument('-r', '--run', type=unicode, nargs='*',
-              default='',
+              default=None,
               help='Run the built program, with specified arguments')
     def util_build(self, magic_self, arg):
         args = parse_argstring(self.util_build, arg)
