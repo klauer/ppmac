@@ -167,7 +167,6 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
         print()
 
     gpascii.set_variable('gather.enable', 0)
-    gpascii.close()
     return get_gather_results(comm, addresses, output_file)
 
 
