@@ -9,6 +9,12 @@ import threading
 import paramiko
 import ppmac_const as const
 
+try:
+    import gather_client
+except ImportError:
+    gather_client = None
+
+
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
 PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
 PPMAC_USER = os.environ.get('PPMAC_USER', 'root')
@@ -320,6 +326,13 @@ class GpasciiChannel(ShellChannel):
         period = self.get_variable(self.VAR_SERVO_PERIOD, type_=float)
         return period * 1e-3
 
+    @property
+    def servo_frequency(self):
+        """
+        The servo frequency, in Hz
+        """
+        return 1.0 / self.servo_period
+
     def get_coord(self, motor):
         """
         Query a motor to determine which coordinate system it's in
@@ -479,9 +492,13 @@ class GpasciiChannel(ShellChannel):
             print('%s = %s' % (var, value))
 
         try:
-            while get_active():
+            active = [True, True, True]
+            while any(active):
+                active.pop(0)
+                active.append(get_active())
+
                 if variables is None or not variables:
-                    time.sleep(0.1)
+                    time.sleep(0.05)
                 else:
                     values = [self.get_variable(var)
                               for var in variables]
@@ -559,11 +576,16 @@ class PPComm(object):
     """
 
     def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
-                 user=PPMAC_USER, password=PPMAC_PASS):
+                 user=PPMAC_USER, password=PPMAC_PASS,
+                 fast_gather=False, fast_gather_port=2332):
         self._host = host
         self._port = port
         self._user = user
         self._pass = password
+
+        self._fast_gather = fast_gather and (gather_client is not None)
+        self._fast_gather_port = fast_gather_port
+        self._gather_client = None
 
         self._client = paramiko.SSHClient()
         self._client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -691,6 +713,28 @@ class PPComm(object):
         Remove a file on the remote machine
         """
         self.sftp.unlink(filename)
+
+    @property
+    def fast_gather(self):
+        if not self._fast_gather:
+            return None
+
+        if self._gather_client is None:
+            client = self._gather_client = gather_client.GatherClient()
+            try:
+                client.connect((self._host, self._fast_gather_port))
+            except Exception as ex:
+                print('Fast gather client disabled (%s) %s' % (ex.__class__.__name__, ex))
+                self._fast_gather = False
+                self._gather_client = None
+            else:
+                client.set_servo_mode()
+
+        return self._gather_client
+
+    @property
+    def fast_gather_port(self):
+        return self._fast_gather_port
 
 
 class CoordinateSave(object):

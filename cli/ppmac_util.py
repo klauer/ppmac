@@ -13,7 +13,45 @@ import logging
 import functools
 import math
 
-from IPython.core.magic_arguments import argument as MagicArgument
+
+class InsList(list):
+    '''
+    Case insensitive list for Power PMAC descriptive addresses,
+    variables, etc.
+
+    Note that this is not an efficient implementation and should
+    not be used for large lists. Additionally, it should only be
+    used to store strings.
+    '''
+    def _get_lower_case(self):
+        for item in self:
+            yield item.lower()
+
+    def lower(self):
+        return InsList(self._get_lower_case())
+
+    def __contains__(self, item):
+        return (item.lower() in self._get_lower_case())
+
+    def index(self, find_item):
+        find_item = find_item.lower()
+        for i, item in enumerate(self._get_lower_case()):
+            if find_item == item:
+                return i
+
+        raise IndexError(find_item)
+
+    def __getslice__(self, *args):
+        return InsList(list.__getslice__(self, *args))
+
+    def __add__(self, *args):
+        return InsList(list.__add__(self, *args))
+
+    def __mul__(self, *args):
+        return InsList(list.__mul__(self, *args))
+
+    def __copy__(self, *args):
+        return InsList(self)
 
 
 class PpmacExported(object):
@@ -56,6 +94,7 @@ def export_magic_by_decorator(ipython, obj,
     """
     all_decorators = set([PpmacExported])
     if magic_arguments:
+        from IPython.core.magic_arguments import argument as MagicArgument
         all_decorators.add(MagicArgument)
 
     is_instance = not isinstance(obj, dict)

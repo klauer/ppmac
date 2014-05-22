@@ -90,6 +90,9 @@ class PpmacCore(Configurable):
     password = traitlets.Unicode('deltatau', config=True)
     auto_connect = traitlets.Bool(True, config=True)
 
+    use_fast_gather = traitlets.Bool(True, config=True)
+    fast_gather_port = traitlets.Int(2332, config=True)
+
     gather_config_file = traitlets.Unicode('/var/ftp/gather/GatherSetting.txt', config=True)
     gather_output_file = traitlets.Unicode('/var/ftp/gather/GatherFile.txt', config=True)
 
@@ -190,7 +193,9 @@ class PpmacCore(Configurable):
             password = self.password
 
         self.comm = PPComm(host=host, port=port,
-                           user=user, password=password)
+                           user=user, password=password,
+                           fast_gather=self.use_fast_gather,
+                           fast_gather_port=self.fast_gather_port)
 
         if self.use_completer_db:
             self.completer = None
@@ -1459,7 +1464,9 @@ def build_utility(comm, source_files, output_name,
                   run=None, timeout=0.0,
                   **kwargs):
 
-    makefile_text = create_util_makefile(source_files, output_name)
+    dest_filenames = [os.path.split(fn)[-1] for fn in source_files]
+
+    makefile_text = create_util_makefile(dest_filenames, output_name)
 
     comm.write_file(os.path.join(dest_path, 'Makefile'), makefile_text)
     if verbose:

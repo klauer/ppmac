@@ -20,6 +20,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 import pp_comm
+import ppmac_util as util
+from ppmac_util import InsList
+
 
 servo_period = 0.442673749446657994 * 1e-3  # default
 max_samples = 0x7FFFFFFF
@@ -90,11 +93,11 @@ def read_settings_file(comm, fn=None):
         addr_dict = settings['gather.addr']
         # addresses comes in as a dictionary of {index: value}
         max_addr = max(addr_dict.keys())
-        addr = [''] * (max_addr + 1)
+        addr_list = InsList(['']) * (max_addr + 1)
         for index, value in addr_dict.items():
-            addr[index] = value
+            addr_list[index] = value
 
-        settings['gather.addr'] = addr
+        settings['gather.addr'] = addr_list
 
     return settings
 
@@ -169,12 +172,28 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
 
 
 def get_gather_results(comm, addresses, output_file=gather_output_file):
-    # -u is for upload
-    comm.shell_command('gather %s -u' % (output_file, ))
+    if comm.fast_gather is not None:
+        # Use the 'fast gather' server
+        client = comm.fast_gather
+        rows = client.get_rows()
 
-    data = comm.read_file(output_file)
-    data = [line.strip() for line in data]
-    return parse_gather(addresses, data)
+        if 'Sys.ServoCount.a' in addresses:
+            idx = addresses.index('Sys.ServoCount.a')
+            servo_period = comm.gpascii.servo_period
+            for row in rows:
+                row[idx] = row[idx] * servo_period
+
+        return rows
+
+    else:
+        # Use the Delta Tau-supplied 'gather' program
+
+        # -u is for upload
+        comm.shell_command('gather %s -u' % (output_file, ))
+
+        lines = comm.read_file(output_file)
+        lines = [line.strip() for line in lines]
+        return parse_gather(addresses, lines)
 
 
 def gather_data_to_file(fn, addr, data, delim='\t'):
@@ -203,7 +222,7 @@ def plot(addr, data):
 
 
 def gather_and_plot(gpascii, addr, duration=0.2, period=1):
-    servo_period = gpascii.get_variable('Sys.ServoPeriod', type_=float) * 1e-3
+    servo_period = gpascii.servo_period
     print('Servo period is %g (%g KHz)' % (servo_period, 1.0 / servo_period))
 
     data = gather(gpascii, addr, duration=duration, period=period)
@@ -347,10 +366,9 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
     comm = gpascii._comm
     gpascii.set_variable('gather.enable', '0')
 
-    gather_lower = [var.lower() for var in gather_vars]
+    gather_vars = InsList(gather_vars)
 
-    if 'sys.servocount.a' not in gather_lower:
-        gather_vars = list(gather_vars)
+    if 'sys.servocount.a' not in gather_vars:
         gather_vars.insert(0, 'Sys.ServoCount.a')
 
     settings = get_settings(gather_vars, period=period,
