@@ -565,8 +565,14 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
+        self._tune_plot(args.motor, settings_file=args.settings_file)
+
+    def _tune_plot(self, motor, settings_file=None):
+        """
+        Plot the most recent gather data for `motor`
+        """
         try:
-            settings, data = self.get_gather_results(args.settings_file)
+            settings, data = self.get_gather_results(settings_file)
         except KeyError as ex:
             logger.error(ex)
             return
@@ -574,8 +580,8 @@ class PpmacCore(Configurable):
         addresses = settings['gather.addr']
         data = np.array(data)
 
-        desired_addr = 'motor[%d].despos.a' % args.motor
-        actual_addr = 'motor[%d].actpos.a' % args.motor
+        desired_addr = 'motor[%d].despos.a' % motor
+        actual_addr = 'motor[%d].actpos.a' % motor
 
         if not addresses or data is None or len(data) == 0:
             print('No data gathered?')
@@ -602,7 +608,7 @@ class PpmacCore(Configurable):
             tl.set_color('r')
 
         plt.xlim(min(x_axis), max(x_axis))
-        plt.title('Motor %d' % args.motor)
+        plt.title('Motor %d' % motor)
         plt.show()
 
     @magic_arguments()
@@ -731,19 +737,23 @@ class PpmacCore(Configurable):
               help='Dwell time (ms)')
     @argument('-g', '--gather', type=unicode, nargs='*',
               help='Gather additional addresses during move')
+    @argument('-p', '--no-plot', dest='no_plot', action='store_true',
+              help='Do not plot after')
     def pyramid(self, magic_args, arg):
         """
         Pyramid move, gather data and plot
 
-        NOTE: This uses a script located in `tune/ramp.txt` to perform the
+        NOTE: This uses a script located in `tune/pyramid.txt` to perform the
               motion.
         """
-        args = parse_argstring(self.ramp, arg)
+        args = parse_argstring(self.pyramid, arg)
 
         if not args:
             return
 
         self.custom_tune('pyramid.txt', args)
+        if not args.no_plot:
+            self._tune_plot(args.motor1)
 
     @magic_arguments()
     @argument('motor1', default=1, type=int,
