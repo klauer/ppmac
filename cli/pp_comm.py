@@ -46,6 +46,7 @@ comm_logger = logging.getLogger('ppmac.Comm')
 
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
+                  re.compile('^\/\/ \*\*\* EOF'),
                   ]
 
 
@@ -409,6 +410,10 @@ class GpasciiChannel(ShellChannel):
                     print('Increasing maxcoords to %d' % (max_coord + 1))
                 self.set_variable('sys.maxcoords', max_coord + 1)
 
+            # Abort any running programs in coordinate systems
+            for coord in coords.keys():
+                self.send_line('&%dabort' % (coord, ))
+
             if undefine_all:
                 # Undefine all coordinate systems
                 self.send_line('undefine all')
@@ -416,10 +421,6 @@ class GpasciiChannel(ShellChannel):
                 # Undefine only the coordinate systems being set here
                 for coord in coords.keys():
                     self.send_line('&%dundefine' % (coord, ))
-
-            # Abort any running programs in coordinate systems
-            for coord in coords.keys():
-                self.send_line('&%dabort' % (coord, ))
 
             for coord, motors in coords.items():
                 for motor, assigned in motors.items():
@@ -457,6 +458,7 @@ class GpasciiChannel(ShellChannel):
 
         command = ''.join(command) % locals()
         self.send_line(command)
+        self.sync()
 
     def run_and_wait(self, coord_sys, program, variables=[],
                      active_var=None, verbose=True, change_callback=None):
@@ -606,11 +608,11 @@ class PPComm(object):
         """
         return GpasciiChannel(self, command=cmd)
 
-    def gpascii_file(self, filename):
+    def gpascii_file(self, filename, **kwargs):
         """
         Execute a gpascii script by remote filename
         """
-        return self.shell_command('gpascii -i"%s"' % filename)
+        return self.shell_command('gpascii -i"%s"' % filename, **kwargs)
 
     def shell_channel(self, cmd=None):
         """

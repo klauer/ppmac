@@ -117,11 +117,6 @@ def parse_gather(addresses, lines):
             for line in lines
             if line.count(' ') == (count - 1)]
 
-    if 'Sys.ServoCount.a' in addresses:
-        idx = addresses.index('Sys.ServoCount.a')
-        for line in data:
-            line[idx] = line[idx] * servo_period
-
     return data
 
 
@@ -170,19 +165,32 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
     return get_gather_results(comm, addresses, output_file)
 
 
+def _check_times(gpascii, addresses, rows):
+    if 'Sys.ServoCount.a' in addresses:
+        idx = addresses.index('Sys.ServoCount.a')
+        servo_period = gpascii.servo_period
+
+        times = [row[idx] for row in rows]
+        if 0 in times:
+            # TODO bugfix?
+            print('Gather data issue, trimming data...')
+            last_time = times.index(0)
+            gather_period = servo_period * gpascii.get_variable('gather.period', type_=float)
+
+            new_times = np.arange(len(rows)) * gather_period
+            for t0, row in zip(new_times, rows):
+                row[idx] = t0
+
+            rows = rows[:last_time]
+
+    return rows
+
+
 def get_gather_results(comm, addresses, output_file=gather_output_file):
     if comm.fast_gather is not None:
         # Use the 'fast gather' server
         client = comm.fast_gather
         rows = client.get_rows()
-
-        if 'Sys.ServoCount.a' in addresses:
-            idx = addresses.index('Sys.ServoCount.a')
-            servo_period = comm.gpascii.servo_period
-            for row in rows:
-                row[idx] = row[idx] * servo_period
-
-        return rows
 
     else:
         # Use the Delta Tau-supplied 'gather' program
@@ -190,9 +198,10 @@ def get_gather_results(comm, addresses, output_file=gather_output_file):
         # -u is for upload
         comm.shell_command('gather %s -u' % (output_file, ))
 
-        lines = comm.read_file(output_file)
-        lines = [line.strip() for line in lines]
-        return parse_gather(addresses, lines)
+        lines = [line.strip() for line in comm.read_file(output_file)]
+        rows = parse_gather(addresses, lines)
+
+    return _check_times(comm.gpascii, addresses, rows)
 
 
 def gather_data_to_file(fn, addr, data, delim='\t'):
@@ -375,15 +384,15 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
     if comm.write_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
-    comm.gpascii_file(gather_config_file)
+    comm.gpascii_file(gather_config_file, verbose=True)
 
     for line in script_text.split('\n'):
-        gpascii.send_line(line)
+        gpascii.send_line(line.lstrip())
 
     gpascii.program(coord_sys, prog, start=True)
 
     if check_active:
-        active_var = 'Coord[%d].ProgActive' % prog
+        active_var = 'Coord[%d].ProgActive' % coord_sys
     else:
         active_var = 'gather.enable'
 

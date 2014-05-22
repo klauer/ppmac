@@ -452,7 +452,6 @@ class PpmacCore(Configurable):
             print('Reading gather settings...')
         settings = gather.read_settings_file(self.comm, settings_file)
         if 'gather.addr' not in settings:
-            print('settings is', settings)
             raise KeyError('gather.addr: Unable to read addresses from settings file (%s)' % settings_file)
 
         if verbose:
@@ -1134,7 +1133,7 @@ class PpmacCore(Configurable):
             self.comm.shell_command('rmmod %s' % args.remote_module, verbose=True)
 
         if args.upload:
-            print('- Uploading the kernel module (%s)' % args.upload)
+            print('- Uploading the kernel module (%s -> %s)' % (args.upload, args.remote_module))
             self.comm.send_file(args.upload, args.remote_module)
 
         print()
@@ -1204,6 +1203,7 @@ class PpmacCore(Configurable):
 
         gpascii = self.comm.gpascii
         gpascii.send_line('&%dabort' % (args.coord, ))
+        gpascii.sync()
 
         if args.filename:
             print('Sending script: %s' % args.filename)
