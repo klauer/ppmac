@@ -223,7 +223,7 @@ class GatherClient(TCPSocket):
         GATHER_TYPES[type_] = ret
         return ret
 
-    def _parse_raw_data(self, types, samples, raw_data):
+    def _parse_raw_data(self, types, raw_data):
         """
         Combines type information and raw data into a 1D array of processed
         data
@@ -234,19 +234,15 @@ class GatherClient(TCPSocket):
         """
         n_items = len(types)
 
-        if samples == 0:
-            return [], n_items, 0
-
         types = [self._get_type(type_) for type_ in types]
 
-        data_format = '>' + ''.join(format_ for (size, format_, conv) in types)
+        line_size = sum(size for (size, format_, conv) in types)
+        line_count = int(len(raw_data) / line_size)
 
-        struct_ = struct.Struct(data_format)
+        data_format = ''.join(format_ for (size, format_, conv) in types)
+        struct_ = struct.Struct('>' + data_format * line_count)
 
-        data = []
-        while raw_data:
-            data.extend(struct_.unpack(raw_data[:struct_.size]))
-            raw_data = raw_data[struct_.size:]
+        data = list(struct_.unpack(raw_data[:(line_size * line_count)]))
 
         for i, (size, format_, conv) in enumerate(types):
             col_slice = slice(i, None, n_items)  # i::n_items
@@ -254,7 +250,7 @@ class GatherClient(TCPSocket):
             if conv is not None:
                 data[col_slice] = [conv(value) for value in col]
 
-        return data, n_items, samples
+        return data, n_items, line_count
 
     def _query_all(self):
         """
@@ -265,7 +261,11 @@ class GatherClient(TCPSocket):
                   number of samples/lines)
         """
         types, samples, raw_data = self.query_types_and_raw_data()
-        return self._parse_raw_data(types, samples, raw_data)
+
+        if samples == 0:
+            return [], len(types), 0
+
+        return self._parse_raw_data(types, raw_data)
 
     def get_columns(self):
         """
