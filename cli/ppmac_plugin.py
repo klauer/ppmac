@@ -1474,29 +1474,39 @@ def build_utility(comm, source_files, output_name,
                   run=None, timeout=0.0,
                   **kwargs):
 
-    dest_filenames = [os.path.split(fn)[-1] for fn in source_files]
+    filenames = [os.path.split(fn)[-1] for fn in source_files]
+    dest_filenames = [os.path.join(dest_path, fn) for fn in filenames]
 
-    makefile_text = create_util_makefile(dest_filenames, output_name)
+    makefile_text = create_util_makefile(filenames, output_name)
 
     comm.write_file(os.path.join(dest_path, 'Makefile'), makefile_text)
     if verbose:
         print('Sending Makefile')
 
-    for fn in source_files:
-        dest_fn = os.path.join(dest_path, os.path.split(fn)[-1])
-        print('Sending', dest_fn)
-        comm.send_file(fn, dest_fn)
+    for source_fn, dest_fn in zip(source_files, dest_filenames):
+        if verbose:
+            print('Sending %s -> %s' % (source_fn, dest_fn))
+
+        comm.send_file(source_fn, dest_fn)
 
     if verbose:
         print('Building...')
+
     lines = comm.shell_command('make -C "%s"' % dest_path, verbose=verbose,
                                **kwargs)
 
     if cleanup:
         print('Cleaning up...')
-        for fn in source_files:
-            comm.remove_file(os.path.join(dest_path, fn))
-        comm.remove_file(os.path.join(dest_path, 'Makefile'))
+        for dest_fn in dest_filenames:
+            try:
+                comm.remove_file(dest_fn)
+            except IOError as ex:
+                print('Error removing %s:% s' % (dest_fn, ex))
+
+        try:
+            comm.remove_file(os.path.join(dest_path, 'Makefile'))
+        except IOError as ex:
+            print('Error removing Makefile: %s' % ex)
 
     errored = False
     for line in lines:
