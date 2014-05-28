@@ -19,7 +19,7 @@ coord_errors = {
     9   : ('CCFeedRateError',      'Moves not specified by feedrate for cutter comp'),
     10  : ('CCDirChangeError',     'Compensated move in opposite direction from programmed move; indicates interference condition'),
     11  : ('CCNoSolutionError',    'No solution could be found for compensated move'),
-    12  : ('CC3NdotTError',        '3D cutter compensation vector calculation error (“NdotT” value less than 1st entry in tool-tip table)'),
+    12  : ('CC3NdotTError',        '3D cutter compensation vector calculation error ("NdotT" value less than 1st entry in tool-tip table)'),
     13  : ('CCDistanceError',      'Could not resolve overcuts by removing moves'),
     14  : ('CCNoIntersectError',   'Could not find intersection of compensated paths'),
     15  : ('CCNoMovesError',       'No compensated moves between lead-in and lead-out moves'),
@@ -30,10 +30,9 @@ coord_errors = {
     64  : ('RadiusErrorbit_0',     'Radius error in X/Y/Z-space circle move'),
     128 : ('RadiusErrorbit_1',     'Radius error in XX/YY/ZZ-space circle move'),
 
-    #19–31   (Reserved for future use)
-    #33–63   (Reserved for future use)
-    #65–127  (Reserved for future use)
-
+    # 19-31   Reserved for future use
+    # 33-63   Reserved for future use
+    # 65-127  Reserved for future use
 }
 
 
