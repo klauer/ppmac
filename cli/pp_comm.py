@@ -145,9 +145,12 @@ class ShellChannel(object):
             self._logger.debug('Sync')
 
             while channel.recv_ready():
-                data = channel.recv(1024)
-                if verbose:
-                    print(data, end='')
+                for line in self.read_timeout(timeout=0):
+                    if 'error' in line:
+                        raise GPError(line)
+
+                    if verbose:
+                        print(line)
 
             if verbose:
                 print()
@@ -194,7 +197,8 @@ class ShellChannel(object):
                     print('<stderr- %s' % line, end='')
                     self._logger.debug('<stderr- %s' % line)
 
-            raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
+            if timeout > 0:
+                raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
     def send_line(self, line, delim='\n'):
         """
@@ -247,7 +251,7 @@ class GpasciiChannel(ShellChannel):
         if check:
             return self.get_variable(var)
 
-    def get_variable(self, var, type_=str, timeout=0.2):
+    def get_variable(self, var, type_=str, timeout=1.0):
         """
         Get a Power PMAC variable, and typecast it to type_
 
