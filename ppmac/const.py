@@ -207,3 +207,40 @@ coord_normal = {'TriggerMove': 0,
                 'ProgActive': 0,
                 'ProgProceeding': 0,
                 }
+
+
+# Part numbers to string identifiers, compiled from the documentation
+parts = {
+    # Gate 3
+    604002: 'ACC24E3',
+    604017: 'ACC5E3',
+    604027: 'ACC59E3',
+    604030: 'PowerBrick',
+
+    # Gate 2
+    603437: 'ACC5E',
+
+    # Gate 1
+    603441: 'ACC24E2S',
+
+    # Gate IO
+    603404: 'ACC28E',
+    603603: 'ACC11C',
+    603474: 'ACC14E',
+    603575: 'ACC65E',
+    603576: 'ACC66E',
+    603577: 'ACC67E',
+    603595: 'ACC68E',
+    }
+
+
+part_types = {0: 'Servo',
+              1: 'MACRO',
+              2: 'Analog I/O',
+              3: 'Digital I/O',
+              }
+
+PWM_FREQ_HZ = 117964800.0
+PWM_FREQ_KHZ = PWM_FREQ_HZ / 1000.0
+MAX_SERVO_DIVIDER = 16
+MAX_PWM_DIVIDER = 8
