@@ -64,21 +64,29 @@ class PositionMonitor(QtGui.QFrame):
         else:
             self.comm = comm
 
+    @property
+    def gpascii(self):
+        if self.comm:
+            return self.comm.gpascii
+        else:
+            return None
+
     def update(self):
         t0 = time.time()
 
         motors = self.motors
-        comm = self.comm
 
-        if self.comm is None:
+        gpascii = self.gpascii
+        if gpascii is None:
             self.reconnect()
-            if self.comm is None:
+            gpascii = self.gpascii
+            if gpascii is None:
                 return
 
         try:
-            act_pos = [comm.get_variable('Motor[%d].ActPos' % i, type_=float)
+            act_pos = [gpascii.get_variable('Motor[%d].ActPos' % i, type_=float)
                        for i in motors]
-            home_pos = [comm.get_variable('Motor[%d].HomePos' % i, type_=float)
+            home_pos = [gpascii.get_variable('Motor[%d].HomePos' % i, type_=float)
                         for i in motors]
         except pp_comm.TimeoutError:
             self.reconnect()
@@ -116,8 +124,6 @@ def main(host=PPMAC_HOST, port=PPMAC_PORT,
     except Exception as ex:
         print('Failed to connect (%s) %s' % (ex.__class__.__name__, ex))
         return
-
-    comm.open_channel()
 
     app.quitOnLastWindowClosed = True
     QtGui.QApplication.instance = app
