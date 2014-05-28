@@ -171,17 +171,18 @@ def _check_times(gpascii, addresses, rows):
         servo_period = gpascii.servo_period
 
         times = [row[idx] for row in rows]
+        gather_period = servo_period * gpascii.get_variable('gather.period', type_=float)
         if 0 in times:
             # TODO bugfix?
             print('Gather data issue, trimming data...')
             last_time = times.index(0)
-            gather_period = servo_period * gpascii.get_variable('gather.period', type_=float)
 
-            new_times = np.arange(len(rows)) * gather_period
-            for t0, row in zip(new_times, rows):
-                row[idx] = t0
+            times = np.arange(len(rows))
 
             rows = rows[:last_time]
+
+        for row, t0 in zip(rows, times):
+            row[idx] = t0 * gather_period
 
     return rows
 
