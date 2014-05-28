@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-:mod:`ppmac_gather` -- Ppmac Gather Utilities
+:mod:`ppmac.gather` -- Ppmac Gather Utilities
 =============================================
 
-.. module:: ppmac_gather
+.. module:: ppmac.gather
    :synopsis: Power PMAC gather utility functions
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
@@ -15,13 +14,14 @@ import time
 import re
 import sys
 import ast
+import functools
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-import pp_comm
-import ppmac_util as util
-from ppmac_util import InsList
+from . import pp_comm
+from . import util
+from .util import InsList
 
 
 servo_period = 0.442673749446657994 * 1e-3  # default
@@ -336,7 +336,6 @@ tune_paths = dict((tool, os.path.join(TUNE_PATH, tool))
 OT_RAMP = 1
 OT_TRAPEZOID = 2
 OT_S_CURVE = 3
-import functools
 
 
 def _other_traj(move_type):
@@ -443,7 +442,7 @@ def main():
     duration = 10.0
     period = 1
 
-    from pp_comm import PPComm
+    from .pp_comm import PPComm
 
     comm = PPComm()
     gpascii = comm.gpascii_channel()

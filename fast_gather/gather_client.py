@@ -190,8 +190,8 @@ class GatherClient(TCPSocket):
         if n_items == 0:
             return types, 0, []
         else:
-            data_buf = self._recv_packet('D')
             assert(n_items == len(types))
+            data_buf = self._recv_packet('D')
             samples, = struct.unpack('>I', data_buf[:4])
             return types, samples, data_buf[4:]
 

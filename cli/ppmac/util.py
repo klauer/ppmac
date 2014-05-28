@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
 # vi:sw=4 ts=4
 """
-:mod:`ppmac_util` -- IPython plugin utilities
+:mod:`ppmac.util` -- IPython plugin utilities
 =============================================
 
-.. module:: ppmac_util
+.. module:: ppmac.util
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 
 """

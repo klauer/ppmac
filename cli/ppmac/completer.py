@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-:mod:`ppmac_completer` -- Ppmac Completer
+:mod:`ppmac.completer` -- Ppmac Completer
 =========================================
 
-.. module:: ppmac_completer
+.. module:: ppmac.completer
    :synopsis: Allows for Python introspection into Power PMAC variables.
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """

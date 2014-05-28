@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-:mod:`ppmac_tune` -- Ppmac Tuning
+:mod:`ppmac.tune` -- Ppmac Tuning
 =================================
 
-.. module:: ppmac_tune
+.. module:: ppmac.tune
    :synopsis: Power PMAC tune utility functions
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
@@ -16,9 +15,9 @@ import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
-from ppmac_gather import get_gather_results
-import ppmac_gather
-import pp_comm
+from .gather import get_gather_results
+from . import gather as gather_mod
+from . import pp_comm
 
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -69,11 +68,11 @@ def custom_tune(gpascii, script_file, motor1=3, distance=0.01, velocity=0.01,
 
     with pp_comm.CoordinateSave(comm, verbose=False):
         try:
-            return ppmac_gather.run_and_gather(gpascii, script, prog=prog,
-                                               coord_sys=coord_sys,
-                                               gather_vars=gather_vars,
-                                               cancel_callback=killed,
-                                               **kwargs)
+            return gather_mod.run_and_gather(gpascii, script, prog=prog,
+                                             coord_sys=coord_sys,
+                                             gather_vars=gather_vars,
+                                             cancel_callback=killed,
+                                             **kwargs)
         finally:
             if kill_after:
                 print('Killing motors')
@@ -367,7 +366,7 @@ def main():
 
         data = np.array(data)
         data[:, 4] /= 4096 * 512
-        #ppmac_gather.plot(gather_vars, data)
+        # gather_mod.plot(gather_vars, data)
         ax1, ax2 = plot_custom(labels, data, left_indices=[1, 2], right_indices=[4],
                                left_label='Position [um]', right_label='Raw encoder [um]')
 

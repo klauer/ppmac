@@ -1,10 +1,9 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
-:mod:`ppmac_const` -- Ppmac-related constants
+:mod:`ppmac.const` -- Ppmac-related constants
 ========================================
 
-.. module:: ppmac_const
+.. module:: ppmac.const
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
 

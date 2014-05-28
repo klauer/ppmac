@@ -1,3 +1,15 @@
+#!/usr/bin/env python
+"""
+:mod:`ppmac.pp_comm` -- Ppmac Communication
+===========================================
+
+.. module:: ppmac.pp_comm
+   :synopsis: Power PMAC communication through SSH by way of Paramiko.
+              Simplifies working with gpascii (the Power PMAC interpreter) remotely.
+              Additionally does simple file operations through SFTP.
+.. moduleauthor:: Ken Lauer <klauer@bnl.gov>
+"""
+
 from __future__ import print_function
 import os
 import re
@@ -7,12 +19,13 @@ import logging
 import threading
 
 import paramiko
-import ppmac_const as const
+from . import const
 
 try:
-    import gather_client
-except ImportError:
+    from . import fast_gather as gather_client
+except ImportError as ex:
     gather_client = None
+    print('Unable to load the fast gather module: %s' % ex, file=sys.stderr)
 
 
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')

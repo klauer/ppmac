@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-# -*- coding: utf-8 -*-
 """
 :mod:`ppmac_plugin` -- Ppmac Core module
 ========================================
@@ -24,14 +23,14 @@ from IPython.core.magic_arguments import (argument, magic_arguments,
                                           parse_argstring)
 
 # Ppmac
-import ppmac_util as util
-from ppmac_util import PpmacExport
-from pp_comm import (PPComm, TimeoutError)
-from pp_comm import GPError
-import ppmac_gather as gather
-import ppmac_completer as completer
-import ppmac_tune as tune
-import ppmac_const as const
+import ppmac.util as util
+from ppmac.util import PpmacExport
+from ppmac.pp_comm import (PPComm, TimeoutError)
+from ppmac.pp_comm import GPError
+import ppmac.gather as gather
+import ppmac.completer as completer
+import ppmac.tune as tune
+import ppmac.const as const
 
 logger = logging.getLogger('PpmacCore')
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
