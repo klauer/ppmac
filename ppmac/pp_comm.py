@@ -109,14 +109,17 @@ class ShellChannel(object):
     An interactive SSH shell channel
     """
 
-    def __init__(self, comm, command=None, single=False):
+    def __init__(self, comm, command=None, single=False, disable_readline=False):
         self.lock = threading.RLock()
         self._comm = comm
         self._client = comm._client
         self._channel = comm._client.invoke_shell()
 
-        self.send_line('/bin/bash --noediting')
+        if disable_readline:
+            self.send_line('/bin/bash --noediting')
+
         self.send_line('stty -echo')
+        self.send_line('export PS1="\u@\h:\w\$ "')
         self.wait_for('%s@.*' % comm._user, verbose=True)
 
         if command is not None:
@@ -285,6 +288,10 @@ class GpasciiChannel(ShellChannel):
                 if '=' in line:
                     vname, value = line.split('=', 1)
                     if var == vname.lower():
+                        if value.startswith('$'):
+                            # check for a hex value
+                            value = int(value[1:], 16)
+
                         return type_(value)
 
     def get_variables(self, variables, type_=str, timeout=0.2,
