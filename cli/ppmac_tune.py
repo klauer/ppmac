@@ -32,7 +32,8 @@ logger = logging.getLogger('ppmac_tune')
 
 def custom_tune(gpascii, script_file, motor1=3, distance=0.01, velocity=0.01,
                 dwell=0.0, accel=1.0, scurve=0.0, prog=999, coord_sys=0,
-                gather=[], motor2=None, iterations=2, kill_after=False):
+                gather=[], motor2=None, iterations=2, kill_after=False,
+                **kwargs):
     """
     Run a tuning script and return the gathered data
 
@@ -71,7 +72,8 @@ def custom_tune(gpascii, script_file, motor1=3, distance=0.01, velocity=0.01,
             return ppmac_gather.run_and_gather(gpascii, script, prog=prog,
                                                coord_sys=coord_sys,
                                                gather_vars=gather_vars,
-                                               cancel_callback=killed)
+                                               cancel_callback=killed,
+                                               **kwargs)
         finally:
             if kill_after:
                 print('Killing motors')
