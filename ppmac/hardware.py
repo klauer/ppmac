@@ -3,6 +3,10 @@
 =============================================
 
 .. module:: ppmac.hardware
+   :synopsis: Get a hierarchical representation of the installed cards in the
+              Power PMAC. Note that not all devices are represented here, but
+              only those that are listed in the incomplete Power PMAC documentation.
+              Additionally, most device classes are just placeholders.
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 
 """
@@ -73,11 +77,24 @@ class ChannelBase(object):
     def gpascii(self):
         return self._gate.gpascii
 
+    def get_variable_name(self, name):
+        """
+        Get the fully qualified variable name of a short variable name
+        e.g., get_variable_name('PfmFormat') => 'Gate3[0].Chan[1].PfmFormat'
+        """
+        return '%s.%s' % (self._base, name)
+
     def get_variable(self, name, **kwargs):
-        return self.gpascii.get_variable(('%s.%s' % (self._base, name)), **kwargs)
+        """
+        Get the value of a variable from gpascii
+        """
+        return self.gpascii.get_variable(self.get_variable_name(name), **kwargs)
 
     def set_variable(self, name, value, **kwargs):
-        return self.gpascii.set_variable(('%s.%s' % (self._base, name)), value, **kwargs)
+        """
+        Set the value of a variable with gpascii
+        """
+        return self.gpascii.set_variable(self.get_variable_name(name), value, **kwargs)
 
     def __repr__(self):
         return '%s(base="%s")' % (self.__class__.__name__, self._base)
@@ -117,11 +134,24 @@ class GateBase(object):
 
         return channel
 
+    def get_variable_name(self, name):
+        """
+        Get the fully qualified variable name of a short variable name
+        e.g., get_variable_name('PartNum') => 'Gate3[0].PartNum'
+        """
+        return '%s.%s' % (self._base, name)
+
     def get_variable(self, name, **kwargs):
-        return self.gpascii.get_variable(('%s.%s' % (self._base, name)), **kwargs)
+        """
+        Get the value of a variable from gpascii
+        """
+        return self.gpascii.get_variable(self.get_variable_name(name), **kwargs)
 
     def set_variable(self, name, value, **kwargs):
-        return self.gpascii.set_variable(('%s.%s' % (self._base, name)), value, **kwargs)
+        """
+        Set the value of a variable with gpascii
+        """
+        return self.gpascii.set_variable(self.get_variable_name(name), value, **kwargs)
 
     def __repr__(self):
         return '%s(index=%d, num=%d, rev=%d, types=%s)' % (self.__class__.__name__,
@@ -147,6 +177,9 @@ class GateBase(object):
         """
         return (self.phase_servo_dir & 2) == 2
 
+    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+        pass
+
     def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
         pass
 
@@ -155,7 +188,7 @@ class Gate12Base(GateBase):
     """
     Base for either Gate 1s or Gate 2s
     """
-    pwm_period = var_prop('PwmPeriod', type_=float)
+    pwm_period = var_prop('PwmPeriod', type_=int)
 
     @property
     def phase_frequency(self):
@@ -169,15 +202,22 @@ class Gate12Base(GateBase):
     def max_phase_frequency(self):
         return 2.0 * self.pwm_frequency
 
-    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
-        value = const.PWM_FREQ_HZ / (2 * (self.phase_clock_div + 1) * phase_freq)
-        print('pwm period would be', value, 'current period is', self.pwm_period)
-        return
+    def _get_pwm_period(self, phase_freq, phase_clock_div):
+        return int(const.PWM_FREQ_HZ / (2 * (phase_clock_div + 1) * phase_freq))
 
-        self.pwm_period = value
+    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+        pwm_period = self._get_pwm_period(phase_freq, phase_clock_div)
+
+        print('pwm period would be', pwm_period, 'current period is', self.pwm_period)
+        return [(self.get_variable_name('PwmPeriod'), pwm_period),
+                (self.get_variable_name('PhaseClockDiv'), phase_clock_div),
+                (self.get_variable_name('ServoClockDiv'), servo_clock_div),
+                ]
+
+    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+        self.pwm_period = self._get_pwm_period(phase_freq, phase_clock_div)
         self.phase_clock_div = phase_clock_div
         self.servo_clock_div = servo_clock_div
-        return self.pwm_period
 
 
 class Gate1(Gate12Base):
@@ -191,6 +231,7 @@ class Gate2(Gate12Base):
 class GateIO(GateBase):
     BASE = 'GateIO[%d]'
     phase_servo_dir = 0
+
 
 class Gate3Channel(ChannelBase):
     """
@@ -215,7 +256,8 @@ class Gate3(GateBase):
 
     def __init__(self, gpascii, index):
         GateBase.__init__(self, gpascii, index)
-        self.options = [gpascii.get_variable('%s.PartOpt%d' % (self._base, n), type_=int) for n in range(self.N_OPT)]
+        self.options = [gpascii.get_variable('%s.PartOpt%d' % (self._base, n), type_=int)
+                        for n in range(self.N_OPT)]
 
     @property
     def opt_base_board(self):
@@ -251,25 +293,29 @@ class Gate3(GateBase):
         return '%s(index=%d, num=%d, rev=%d, types=%s)' % (self.__class__.__name__, self._index,
                                                            self.num, self.rev, self.types)
 
-    def _update_clock(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
-                      pwm_freq_mult=None, **kwargs):
-        print('setting phase freq', phase_freq, 'current is', self.phase_frequency)
+    def get_clock_settings(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
+                           pwm_freq_mult=None, **kwargs):
+        ret = []
+
+        # Phase clock divider is ignored if this is the phase clock master
         if self.phase_master:
-            for i, chan in self.channels.items():
-                print('channel', i, 'freq mult', chan.pwm_freq_mult)
+            phase_clock_div = 0
 
-        return
-
-        if self.phase_master:
-            self.phase_clock_div = 0
-        else:
-            self.phase_clock_div = phase_clock_div
-
-        self.servo_clock_div = servo_clock_div
+        ret.append((self.get_variable_name('PhaseClockDiv'), phase_clock_div))
+        ret.append((self.get_variable_name('ServoClockDiv'), servo_clock_div))
 
         if self.phase_master and pwm_freq_mult is not None:
             for i, chan in self.channels.items():
-                chan.pwm_freq_mult = pwm_freq_mult
+                ret.append((chan.get_variable_name('PwmFreqMult'), pwm_freq_mult))
+
+        return ret
+
+    def _update_clock(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
+                      pwm_freq_mult=None, **kwargs):
+        for line in self.get_clock_settings(phase_freq, phase_clock_div=phase_clock_div,
+                                            servo_clock_div=servo_clock_div,
+                                            pwm_freq_mult=None, **kwargs):
+            self.gpascii.send_line(line)
 
 
 class ACC24E3(Gate3):
