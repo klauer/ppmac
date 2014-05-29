@@ -23,18 +23,24 @@ from . import pp_comm
 from .util import InsList
 
 
-# default_servo_period = 0.442673749446657994 * 1e-3
 max_samples = 0x7FFFFFFF
-#max_samples = 5000
 gather_config_file = '/var/ftp/gather/GatherSetting.txt'
 gather_output_file = '/var/ftp/gather/GatherFile.txt'
 
 
 def get_sample_count(servo_period, gather_period, duration):
+    """
+    For a specified servo and gather period, return the number
+    of samples required to get a specific duration.
+    """
     return int(duration / (servo_period * gather_period))
 
 
 def get_duration(servo_period, gather_period, samples):
+    """
+    For a specified servo and gather period, return the duration
+    in seconds of how long the gather would run
+    """
     return int(samples) * (servo_period * gather_period)
 
 
@@ -175,18 +181,19 @@ def _check_times(gpascii, addresses, rows):
         servo_period = gpascii.servo_period
 
         times = [row[idx] for row in rows]
-        gather_period = servo_period * gpascii.get_variable('gather.period', type_=float)
+
+        gather_period = gpascii.get_variable('gather.period', type_=int)
         if 0 in times:
             # TODO bugfix?
             print('Gather data issue, trimming data...')
             last_time = times.index(0)
 
-            times = np.arange(len(rows))
+            times = np.arange(0, len(rows) * gather_period, gather_period)
 
             rows = rows[:last_time]
 
         for row, t0 in zip(rows, times):
-            row[idx] = t0 * gather_period
+            row[idx] = t0 * servo_period
 
     return rows
 
