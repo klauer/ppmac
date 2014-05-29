@@ -24,33 +24,35 @@ from . import util
 from .util import InsList
 
 
-servo_period = 0.442673749446657994 * 1e-3  # default
+# default_servo_period = 0.442673749446657994 * 1e-3
 max_samples = 0x7FFFFFFF
 #max_samples = 5000
 gather_config_file = '/var/ftp/gather/GatherSetting.txt'
 gather_output_file = '/var/ftp/gather/GatherFile.txt'
 
 
-def get_sample_count(period, duration):
-    return int(duration / (servo_period * period))
+def get_sample_count(servo_period, gather_period, duration):
+    return int(duration / (servo_period * gather_period))
 
 
-def get_duration(period, samples):
-    return int(samples) * (servo_period * period)
+def get_duration(servo_period, gather_period, samples):
+    return int(samples) * (servo_period * gather_period)
 
 
-def get_settings(addresses=[], period=1, duration=2.0, samples=None):
+def get_settings(servo_period, addresses=[], gather_period=1, duration=2.0,
+                 samples=None):
+
     if samples is not None:
-        duration = get_duration(period, samples)
+        duration = get_duration(servo_period, gather_period, samples)
     else:
-        samples = get_sample_count(period, duration)
+        samples = get_sample_count(servo_period, gather_period, duration)
 
     yield 'gather.enable=0'
     for i, addr in enumerate(addresses):
         yield 'gather.addr[%d]=%s' % (i, addr)
 
     yield 'gather.items=%d' % len(addresses)
-    yield 'gather.Period=%d' % period
+    yield 'gather.Period=%d' % gather_period
     yield 'gather.enable=1'
     yield 'gather.enable=0'
     yield 'gather.MaxSamples=%d' % samples
@@ -123,9 +125,12 @@ def parse_gather(addresses, lines):
 def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
     comm = gpascii._comm
 
-    total_samples = get_sample_count(period, duration)
+    servo_period = gpascii.servo_period
 
-    settings = get_settings(addresses, duration=duration, period=period)
+    total_samples = get_sample_count(servo_period, period, duration)
+
+    settings = get_settings(servo_period, addresses, duration=duration,
+                            gather_period=period)
 
     if comm.write_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
@@ -135,7 +140,7 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
     max_lines = gpascii.get_variable('gather.maxlines', type_=int)
     if max_lines < total_samples:
         total_samples = max_lines
-        duration = get_duration(period, total_samples)
+        duration = get_duration(servo_period, period, total_samples)
         gpascii.set_variable('gather.maxsamples', total_samples)
 
         print('* Warning: Buffer not large enough.')
@@ -379,8 +384,10 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
     if 'sys.servocount.a' not in gather_vars:
         gather_vars.insert(0, 'Sys.ServoCount.a')
 
-    settings = get_settings(gather_vars, period=period,
+    settings = get_settings(gpascii.servo_period, gather_vars,
+                            gather_period=period,
                             samples=samples)
+
     if comm.write_file(gather_config_file, '\n'.join(settings)):
         print('Wrote configuration to', gather_config_file)
 
@@ -432,8 +439,6 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
 
 
 def main():
-    global servo_period
-
     addr = ['Sys.ServoCount.a',
             'Motor[3].Pos.a',
             #'Motor[4].Pos.a',
