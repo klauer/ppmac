@@ -301,6 +301,7 @@ class Gate3(GateBase):
         if self.phase_master:
             phase_clock_div = 0
 
+        ret.append((self.get_variable_name('PhaseFreq'), phase_freq))
         ret.append((self.get_variable_name('PhaseClockDiv'), phase_clock_div))
         ret.append((self.get_variable_name('ServoClockDiv'), servo_clock_div))
 

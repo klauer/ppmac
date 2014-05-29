@@ -237,7 +237,6 @@ class GpasciiChannel(ShellChannel):
 
     CMD_GPASCII = 'gpascii -2'
     EOT = '\04'
-    VAR_SERVO_PERIOD = 'Sys.ServoPeriod'
 
     def __init__(self, comm, command=None):
         if command is None:
@@ -348,7 +347,7 @@ class GpasciiChannel(ShellChannel):
         """
         The servo period, in seconds
         """
-        period = self.get_variable(self.VAR_SERVO_PERIOD, type_=float)
+        period = self.get_variable('Sys.ServoPeriod', type_=float)
         return period * 1e-3
 
     @property

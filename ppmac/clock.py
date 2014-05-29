@@ -87,7 +87,7 @@ def get_global_phase_script(devices, phase_freq, servo_divider,
 
             script_lines.append('')
 
-    servo_period_ms = 1000.0 * (servo_divider + 1) / phase_master.phase_frequency
+    servo_period_ms = 1000.0 * (servo_divider + 1) / phase_freq
     phase_over_servo_pd = 1. / (servo_divider + 1)
     script_lines.append('Sys.ServoPeriod=%g' % servo_period_ms)
     script_lines.append('Sys.PhaseOverServoPeriod=%g' % phase_over_servo_pd)
@@ -139,7 +139,10 @@ def test():
     print('current servo period is', gpascii.get_variable('Sys.ServoPeriod'))
     print('current phase over servo period is', gpascii.get_variable('Sys.PhaseOverServoPeriod'))
 
-    set_global_phase(devices, phase_master.phase_frequency, 14)
+    if 1:
+        set_global_phase(devices, 10000, 14)
+    else:
+        set_global_phase(devices, phase_master.phase_frequency, 14)
 
 
 if __name__ == '__main__':

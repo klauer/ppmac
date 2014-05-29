@@ -20,7 +20,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from . import pp_comm
-from . import util
 from .util import InsList
 
 
@@ -237,7 +236,7 @@ def plot(addr, data):
 
 def gather_and_plot(gpascii, addr, duration=0.2, period=1):
     servo_period = gpascii.servo_period
-    print('Servo period is %g (%g KHz)' % (servo_period, 1.0 / servo_period))
+    print('Servo period is %g (%g KHz)' % (servo_period, 1.0 / (servo_period * 1000)))
 
     data = gather(gpascii, addr, duration=duration, period=period)
     gather_data_to_file('test.txt', addr, data)
