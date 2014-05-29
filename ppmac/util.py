@@ -175,3 +175,62 @@ def tracking_filter(cutoff_freq, damping_ratio=0.7, servo_period=0.4426737494466
     print('Kp %g Ki %g' % (Kp, Ki))
     print('Time constant: %d servo cycles' % Tf)
     return index1, index2
+
+
+class SaveVariable(object):
+    """
+    Context manager which saves the current value of a variable,
+    then restores it after the context exits.
+
+    The value can be optionally set upon entering the context
+    by specifying `new_value`.
+    """
+    def __init__(self, gpascii, variable, new_value=None, verbose=False):
+        self._gpascii = gpascii
+        self._variable = variable
+        self._verbose = verbose
+        self._stored_value = None
+        self._new_value = new_value
+
+    @property
+    def current_value(self):
+        return self._gpascii.get_variable(self._variable)
+
+    def set_value(self, value):
+        self._gpascii.set_variable(self._variable, value)
+
+    def __enter__(self):
+        self._stored_value = self.current_value
+        if self._verbose:
+            print('Saving %s = %s' % (self._variable, self._stored_value))
+
+        if self._new_value is not None:
+            if self._verbose:
+                print('Setting %s = %s' % (self._variable, self._new_value))
+
+            self.set_value(self._new_value)
+
+    def __exit__(self, type_, value, traceback):
+        if self._verbose:
+            print('Restoring %s = %s (was %s)' %
+                  (self._variable, self._stored_value, self.current_value))
+
+        self.set_value(self._stored_value)
+
+
+class WpKeySave(SaveVariable):
+    """
+    Context manager which saves the current value of Sys.WpKey,
+    then allows for system parameters to be modified in the
+    context block (i.e., Sys.WpKey = $AAAAAAAA). The previous
+    value is restored after the context exits.
+    """
+    UNLOCK_VALUE = '$AAAAAAAA'
+
+    def __init__(self, gpascii, **kwargs):
+        SaveVariable.__init__(self, gpascii, 'Sys.WpKey',
+                              new_value=self.UNLOCK_VALUE, **kwargs)
+
+    @property
+    def current_value(self):
+        return '$%X' % self._gpascii.get_variable(self._variable, type_=int)
