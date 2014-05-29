@@ -12,6 +12,7 @@ from __future__ import print_function
 from .hardware import enumerate_hardware
 from .hardware import GateIO
 from . import const
+from . import util
 
 
 def get_clock_master(devices):
@@ -47,7 +48,9 @@ def valid_pwm_frequencies(phase_freq):
 
 
 def get_global_phase_script(devices, phase_freq, servo_divider,
-                            phase_divider=0, pwm_freq_mult=None):
+                            phase_divider=0, pwm_freq_mult=0,
+                            phase_mult=0,
+                            time_base=100):
     """
     Get a script that would setup the clock for all devices and
     channels.
@@ -79,7 +82,8 @@ def get_global_phase_script(devices, phase_freq, servo_divider,
     script_lines = []
     for device in devices:
         s = device.get_clock_settings(phase_freq, phase_divider, servo_divider,
-                                      pwm_freq_mult=pwm_freq_mult)
+                                      pwm_freq_mult=pwm_freq_mult,
+                                      phase_clock_mult=phase_mult)
 
         if s is not None:
             for var, value in s:
@@ -91,12 +95,16 @@ def get_global_phase_script(devices, phase_freq, servo_divider,
     phase_over_servo_pd = 1. / (servo_divider + 1)
     script_lines.append('Sys.ServoPeriod=%g' % servo_period_ms)
     script_lines.append('Sys.PhaseOverServoPeriod=%g' % phase_over_servo_pd)
+
+    if time_base is not None:
+        # Set the time base for all coordinate systems
+        script_lines.append('&*%{0}'.format(time_base))
+
     return script_lines
 
 
-def set_global_phase(devices, phase_freq, servo_divider,
-                     phase_divider=0, pwm_freq_mult=None,
-                     verbose=True):
+def set_global_phase(devices, phase_freq, servo_divider, verbose=True,
+                     **kwargs):
     """
     Set the phase clock settings
 
@@ -104,19 +112,23 @@ def set_global_phase(devices, phase_freq, servo_divider,
     """
 
     script = get_global_phase_script(devices, phase_freq, servo_divider,
-                                     phase_divider=phase_divider, pwm_freq_mult=pwm_freq_mult)
+                                     **kwargs)
 
     gpascii = devices[0].gpascii
-    for line in script:
-        if not line:
-            continue
+    with util.WpKeySave(gpascii, verbose=True):
+        for line in script:
+            if not line:
+                continue
 
-        if verbose and ('=' in line):
-            var, value = line.split('=')
-            print('Setting %s=%s (current value=%s)' %
-                  (var, value, gpascii.get_variable(var)))
+            if verbose:
+                if '=' in line:
+                    var, value = line.split('=')
+                    print('Setting %s=%s (current value=%s)' %
+                          (var, value, gpascii.get_variable(var)))
+                else:
+                    print('Sending %s' % line)
 
-        gpascii.send_line(line)
+            gpascii.send_line(line)
 
 
 def test():
@@ -140,9 +152,9 @@ def test():
     print('current phase over servo period is', gpascii.get_variable('Sys.PhaseOverServoPeriod'))
 
     if 1:
-        set_global_phase(devices, 10000, 14)
+        set_global_phase(devices, 10000, 1)
     else:
-        set_global_phase(devices, phase_master.phase_frequency, 14)
+        set_global_phase(devices, phase_master.phase_frequency, 7)
 
 
 if __name__ == '__main__':

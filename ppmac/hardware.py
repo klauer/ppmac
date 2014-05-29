@@ -203,12 +203,11 @@ class Gate12Base(GateBase):
         return 2.0 * self.pwm_frequency
 
     def _get_pwm_period(self, phase_freq, phase_clock_div):
-        return int(const.PWM_FREQ_HZ / (2 * (phase_clock_div + 1) * phase_freq))
+        return int(const.PWM_FREQ_HZ / (2 * (phase_clock_div + 1) * phase_freq)) - 1
 
     def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
         pwm_period = self._get_pwm_period(phase_freq, phase_clock_div)
 
-        print('pwm period would be', pwm_period, 'current period is', self.pwm_period)
         return [(self.get_variable_name('PwmPeriod'), pwm_period),
                 (self.get_variable_name('PhaseClockDiv'), phase_clock_div),
                 (self.get_variable_name('ServoClockDiv'), servo_clock_div),
@@ -252,7 +251,9 @@ class Gate3(GateBase):
     N_OPT = 8
     BASE = 'Gate3[%d]'
     channel_class = Gate3Channel
+
     phase_frequency = var_prop('PhaseFreq', type_=float)
+    phase_clock_mult = var_prop('PhaseClockMult', type_=int)
 
     def __init__(self, gpascii, index):
         GateBase.__init__(self, gpascii, index)
@@ -294,18 +295,20 @@ class Gate3(GateBase):
                                                            self.num, self.rev, self.types)
 
     def get_clock_settings(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
-                           pwm_freq_mult=None, **kwargs):
+                           pwm_freq_mult=None, phase_clock_mult=0, **kwargs):
         ret = []
 
         # Phase clock divider is ignored if this is the phase clock master
         if self.phase_master:
             phase_clock_div = 0
+            phase_clock_mult = 0
 
         ret.append((self.get_variable_name('PhaseFreq'), phase_freq))
         ret.append((self.get_variable_name('PhaseClockDiv'), phase_clock_div))
+        ret.append((self.get_variable_name('PhaseClockMult'), phase_clock_mult))
         ret.append((self.get_variable_name('ServoClockDiv'), servo_clock_div))
 
-        if self.phase_master and pwm_freq_mult is not None:
+        if pwm_freq_mult is not None:
             for i, chan in self.channels.items():
                 ret.append((chan.get_variable_name('PwmFreqMult'), pwm_freq_mult))
 
