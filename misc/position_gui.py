@@ -19,8 +19,8 @@ from PyQt4 import (QtGui, QtCore)
 from PyQt4.QtCore import Qt
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(MODULE_PATH, '../cli'))
-import pp_comm
+sys.path.insert(0, os.path.join(MODULE_PATH, '..'))
+from ppmac import pp_comm
 
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
 PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
