@@ -29,7 +29,7 @@ from ppmac.pp_comm import (PPComm, TimeoutError)
 from ppmac.pp_comm import GPError
 import ppmac.gather as gather
 import ppmac.completer as completer
-import ppmac.tune as tune
+import ppmac.tune as tune_mod
 import ppmac.const as const
 
 logger = logging.getLogger('PpmacCore')
@@ -523,10 +523,15 @@ class PpmacCore(Configurable):
                       if hasattr(magic_args, name))
 
         if range_var is not None:
-            return tune.tune_range(self.comm.gpascii, fn, range_var, range_values,
-                                   **kwargs)
+            return tune_mod.tune_range(self.comm.gpascii, fn, range_var, range_values,
+                                       **kwargs)
         else:
-            return tune.custom_tune(self.comm.gpascii, fn, **kwargs)
+            gather_vars, data = tune_mod.custom_tune(self.comm.gpascii, fn, **kwargs)
+            plot = hasattr(magic_args, 'no_plot') and not magic_args.no_plot
+            if plot:
+                self._tune_plot(magic_args.motor1, gathered=(gather_vars, data))
+
+            return gather_vars, data
 
     @magic_arguments()
     @argument('filename', type=unicode, nargs='?',
@@ -565,17 +570,21 @@ class PpmacCore(Configurable):
 
         self._tune_plot(args.motor, settings_file=args.settings_file)
 
-    def _tune_plot(self, motor, settings_file=None):
+    def _tune_plot(self, motor, settings_file=None, gathered=None):
         """
         Plot the most recent gather data for `motor`
         """
-        try:
-            settings, data = self.get_gather_results(settings_file)
-        except KeyError as ex:
-            logger.error(ex)
-            return
+        if gathered is not None:
+            addresses, data = gathered
+        else:
+            try:
+                settings, data = self.get_gather_results(settings_file)
+            except KeyError as ex:
+                logger.error(ex)
+                return
 
-        addresses = settings['gather.addr']
+            addresses = settings['gather.addr']
+
         data = np.array(data)
 
         desired_addr = 'motor[%d].despos.a' % motor
@@ -585,8 +594,8 @@ class PpmacCore(Configurable):
             print('No data gathered?')
             return
 
-        cols = tune.get_columns(addresses, data,
-                                'sys.servocount.a', desired_addr, actual_addr)
+        cols = tune_mod.get_columns(addresses, data,
+                                    'sys.servocount.a', desired_addr, actual_addr)
 
         x_axis, desired, actual = cols
 
@@ -700,11 +709,11 @@ class PpmacCore(Configurable):
             if items:
                 return ', '.join('%s' % item for item in items)
 
-        ax1, ax2 = tune.plot_custom(addresses, data, x_index=x_index,
-                                    left_indices=left_indices,
-                                    right_indices=right_indices,
-                                    left_label=make_label(args.left),
-                                    right_label=make_label(args.right))
+        ax1, ax2 = tune_mod.plot_custom(addresses, data, x_index=x_index,
+                                        left_indices=left_indices,
+                                        right_indices=right_indices,
+                                        left_label=make_label(args.left),
+                                        right_label=make_label(args.right))
 
         if args.limits:
             ly1, ly2 = ax1.get_ylim()
@@ -750,8 +759,41 @@ class PpmacCore(Configurable):
             return
 
         self.custom_tune('pyramid.txt', args)
-        if not args.no_plot:
-            self._tune_plot(args.motor1)
+
+    @magic_arguments()
+    @argument('script_name', type=unicode,
+              help='Script name without .txt extension')
+    @argument('motor1', default=1, type=int,
+              help='Motor number')
+    @argument('distance', default=1.0, type=float,
+              help='Move distance per step (motor units)')
+    @argument('velocity', default=1.0, type=float,
+              help='Velocity (motor units/s)')
+    @argument('iterations', default=1, type=int, nargs='?',
+              help='Steps')
+    @argument('-k', '--kill', dest='kill_after', action='store_true',
+              help='Kill the motor after the move')
+    @argument('-a', '--accel', default=1.0, type=float,
+              help='Set acceleration time (mu/ms^2)')
+    @argument('-d', '--dwell', default=1.0, type=float,
+              help='Dwell time (ms)')
+    @argument('-g', '--gather', type=unicode, nargs='*',
+              help='Gather additional addresses during move')
+    @argument('-p', '--no-plot', dest='no_plot', action='store_true',
+              help='Do not plot after')
+    def tune(self, magic_args, arg):
+        """
+        Run custom tune script, gather data and plot
+
+        NOTE: This uses a script located in `tune/(script_name).txt` to perform the
+              motion.
+        """
+        args = parse_argstring(self.tune, arg)
+
+        if not args:
+            return
+
+        self.custom_tune('%s.txt' % args.script_name, args)
 
     @magic_arguments()
     @argument('motor1', default=1, type=int,
@@ -770,6 +812,8 @@ class PpmacCore(Configurable):
               help='Dwell time (ms)')
     @argument('-g', '--gather', type=unicode, nargs='*',
               help='Gather additional addresses during move')
+    @argument('-p', '--no-plot', dest='no_plot', action='store_true',
+              help='Do not plot after')
     def ramp(self, magic_args, arg):
         """
         Ramp move, gather data and plot
@@ -783,36 +827,6 @@ class PpmacCore(Configurable):
             return
 
         self.custom_tune('ramp.txt', args)
-
-    @magic_arguments()
-    @argument('script', type=str,
-              help='Script name')
-    @argument('motor1', default=1, type=int,
-              help='Motor number')
-    @argument('distance', default=1.0, type=float,
-              help='Move distance (motor units)')
-    @argument('velocity', default=1.0, type=float,
-              help='Velocity (motor units/s)')
-    @argument('iterations', default=1, type=int, nargs='?',
-              help='Repetitions')
-    @argument('-k', '--kill', dest='kill_after', action='store_true',
-              help='Kill the motor after the move')
-    @argument('-a', '--accel', default=1.0, type=float,
-              help='Set acceleration time (mu/ms^2)')
-    @argument('-d', '--dwell', default=1.0, type=float,
-              help='Dwell time (ms)')
-    @argument('-g', '--gather', type=unicode, nargs='*',
-              help='Gather additional addresses during move')
-    def ctune(self, magic_args, arg):
-        """
-        Run custom tuning script in tune/{script}
-        """
-        args = parse_argstring(self.ctune, arg)
-
-        if not args:
-            return
-
-        self.custom_tune(args.script, args)
 
     @magic_arguments()
     @argument('script', default='ramp.txt', type=unicode,
@@ -911,19 +925,19 @@ class PpmacCore(Configurable):
             if not args or not self.check_comm():
                 return
 
-            cmd = tune.other_trajectory(move_type, args.motor, args.distance,
-                                        velocity=args.velocity, accel=args.accel,
-                                        dwell=args.dwell, reps=args.reps,
-                                        one_direction=args.one_direction,
-                                        kill=not args.no_kill)
+            cmd = tune_mod.other_trajectory(move_type, args.motor, args.distance,
+                                            velocity=args.velocity, accel=args.accel,
+                                            dwell=args.dwell, reps=args.reps,
+                                            one_direction=args.one_direction,
+                                            kill=not args.no_kill)
 
-            addrs, data = tune.run_tune_program(self.comm, cmd)
-            tune.plot_tune_results(addrs, data)
+            addrs, data = tune_mod.run_tune_program(self.comm, cmd)
+            tune_mod.plot_tune_results(addrs, data)
         return move
 
-    dt_ramp = other_trajectory(tune.OT_RAMP)
-    dt_trapezoid = other_trajectory(tune.OT_TRAPEZOID)
-    dt_scurve = other_trajectory(tune.OT_S_CURVE)
+    dt_ramp = other_trajectory(tune_mod.OT_RAMP)
+    dt_trapezoid = other_trajectory(tune_mod.OT_TRAPEZOID)
+    dt_scurve = other_trajectory(tune_mod.OT_S_CURVE)
 
     @magic_arguments()
     @argument('motor', default=1, type=int,
@@ -939,8 +953,8 @@ class PpmacCore(Configurable):
             return
 
         search_text = ' '.join(args.text).lower()
-        for obj, value in tune.get_settings(self._gpascii, args.motor,
-                                            completer=self.completer):
+        for obj, value in tune_mod.get_settings(self._gpascii, args.motor,
+                                                completer=self.completer):
             if isinstance(obj, completer.PPCompleterNode):
                 try:
                     desc = obj.row['Comments']
@@ -975,8 +989,8 @@ class PpmacCore(Configurable):
             logger.error('Destination motor should be different from source motor')
             return
 
-        tune.copy_settings(self._gpascii, args.motor_from, args.motor_to,
-                           completer=self.completer)
+        tune_mod.copy_settings(self._gpascii, args.motor_from, args.motor_to,
+                               completer=self.completer)
 
     @magic_arguments()
     @argument('variable', type=unicode,

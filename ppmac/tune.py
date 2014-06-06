@@ -67,6 +67,19 @@ def custom_tune(gpascii, script_file, motor1=3, distance=0.01, velocity=0.01,
     comm = gpascii._comm
 
     with pp_comm.CoordinateSave(comm, verbose=False):
+        gpascii.set_servo_control(motor1, True)
+        gpascii.motor_hold_position(motor1)
+
+        coords = {motor1: 'x'}
+        if motor1 != motor2:
+            coords = {motor2: 'y'}
+
+            gpascii.set_servo_control(motor2, True)
+            gpascii.motor_hold_position(motor2)
+
+        gpascii.set_coords({coord_sys: coords},
+                           undefine_coord=True)
+
         try:
             return gather_mod.run_and_gather(gpascii, script, prog=prog,
                                              coord_sys=coord_sys,

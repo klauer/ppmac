@@ -149,7 +149,7 @@ class ShellChannel(object):
 
             return False
 
-    def sync(self, verbose=False):
+    def sync(self, verbose=False, timeout=0.01):
         """
         Empty the incoming read buffer
         """
@@ -160,13 +160,15 @@ class ShellChannel(object):
         with self.lock:
             self._logger.debug('Sync')
 
-            while channel.recv_ready():
-                for line in self.read_timeout(timeout=0):
+            try:
+                for line in self.read_timeout(timeout=timeout):
                     if 'error' in line:
                         raise GPError(line)
 
                     if verbose:
                         print(line)
+            except TimeoutError:
+                pass
 
             if verbose:
                 print()
@@ -216,7 +218,7 @@ class ShellChannel(object):
             if timeout > 0:
                 raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
-    def send_line(self, line, delim='\n'):
+    def send_line(self, line, delim='\n', sync=False):
         """
         Send a single line of text (with a delimiter at the end)
         """
@@ -227,6 +229,9 @@ class ShellChannel(object):
         with self.lock:
             self._logger.debug('-> %s' % line)
             channel.send('%s%s' % (line, delim))
+
+        if sync:
+            self.sync()
 
 
 class GpasciiChannel(ShellChannel):
@@ -411,8 +416,22 @@ class GpasciiChannel(ShellChannel):
 
         return coords
 
-    def set_coords(self, coords, verbose=False, undefine=True,
-                   undefine_all=False):
+    def get_motor_coords(self):
+        """
+        Get the coordinate systems motors are assigned to
+
+        Returns a dictionary with key=motor, value=coordinate system
+        """
+        coords = self.get_coords()
+        ret = {}
+        for coord, motors in coords.items():
+            for motor, axis in motors.items():
+                ret[motor] = coord
+
+        return ret
+
+    def set_coords(self, coords, verbose=False, undefine_coord=False,
+                   undefine_all=False, check=True):
         """
         Clear and then set all of the coordinate systems
         as in `coords`.
@@ -440,21 +459,47 @@ class GpasciiChannel(ShellChannel):
             if undefine_all:
                 # Undefine all coordinate systems
                 self.send_line('undefine all')
-            elif undefine:
+            elif undefine_coord:
                 # Undefine only the coordinate systems being set here
                 for coord in coords.keys():
                     self.send_line('&%dundefine' % (coord, ))
 
+            # Ensure the motors aren't in coordinate systems already
+            motor_to_coord = self.get_motor_coords()
             for coord, motors in coords.items():
                 for motor, assigned in motors.items():
-                    send_ = '&%d#%d->%s' % (coord, motor, assigned)
+                    try:
+                        coord = motor_to_coord[motor]
+                    except KeyError:
+                        # Not in coordinate system currently
+                        pass
+                    else:
+                        # Remove it from the coordinate sytem
+                        undef_line = '&%d#%d->0' % (coord, motor, )
+                        self.send_line(undef_line, sync=True)
+
+            # Then assign them to the new coordinate systems
+            for coord, motors in coords.items():
+                for motor, assigned in motors.items():
+                    assign_line = '&%d#%d->%s' % (coord, motor, assigned)
                     if verbose:
                         print('Coordinate system %d: motor %d is %s' %
                               (coord, motor, assigned))
 
-                    self.send_line(send_)
+                    try:
+                        self.send_line(assign_line, sync=True)
+                    except GPError as ex:
+                        raise GPError('Failed to set coord[%d] motor %d: %s' % (coord, motor, ex))
 
-            self.sync()
+            if check:
+                current = self.get_coords()
+                for coord, motors in coords.items():
+                    motors = [(num, axis.lower()) for num, axis in motors.items()]
+                    motors_current = [(num, axis.lower()) for num, axis in current[coord].items()]
+                    if set(motors) != set(motors_current):
+                        if verbose:
+                            print(motors, motors_current)
+                        raise ValueError('Motors in coord system %d differ' % (coord, ))
 
         if verbose:
             print('Done')
@@ -480,8 +525,7 @@ class GpasciiChannel(ShellChannel):
             command.append('abort')
 
         command = ''.join(command) % locals()
-        self.send_line(command)
-        self.sync()
+        self.send_line(command, sync=True)
 
     def run_and_wait(self, coord_sys, program, variables=[],
                      active_var=None, verbose=True, change_callback=None):
@@ -593,6 +637,31 @@ class GpasciiChannel(ShellChannel):
                 print('%s = %s' % (var, value), file=f)
 
         return values
+
+    def get_servo_control(self, motor):
+        return (1 == self.get_variable('Motor[%d].ServoCtrl' % motor, type_=int))
+
+    def set_servo_control(self, motor, enabled):
+        if enabled:
+            enabled = 1
+        else:
+            enabled = 0
+
+        self.set_variable('Motor[%d].ServoCtrl' % motor, 1)
+        return self.get_servo_control(motor)
+
+    def motor_hold_position(self, motor):
+        with self.lock:
+            self.send_line('#%djog/' % motor, sync=True)
+
+    def jog(self, motor, position, relative=False):
+        with self.lock:
+            if relative:
+                cmd = '^'
+            else:
+                cmd = '='
+
+            self.send_line('#%djog%s%.8f' % (motor, cmd, position), sync=True)
 
 
 class PPComm(object):
