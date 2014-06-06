@@ -1,8 +1,4 @@
-&%(coord_sys)da
 open prog%(prog)d close
-
-Motor[%(motor1)d].ServoCtrl=1
-#%(motor1)dj/
 
 close all buffers
 open prog %(prog)d
@@ -33,5 +29,3 @@ open prog %(prog)d
     dwell0
     gather.enable=0
 close
-undefine all
-&%(coord_sys)d#%(motor1)d->X
