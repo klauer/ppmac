@@ -31,6 +31,8 @@ import ppmac.gather as gather
 import ppmac.completer as completer
 import ppmac.tune as tune_mod
 import ppmac.const as const
+import ppmac.clock as clock_mod
+import ppmac.hardware as hardware
 
 logger = logging.getLogger('PpmacCore')
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -598,6 +600,8 @@ class PpmacCore(Configurable):
                                     'sys.servocount.a', desired_addr, actual_addr)
 
         x_axis, desired, actual = cols
+
+        x_axis = np.array(x_axis) - x_axis[0]
 
         fig, ax1 = plt.subplots()
         ax1.plot(x_axis, desired, color='black', label='Desired')
@@ -1468,6 +1472,47 @@ class PpmacCore(Configurable):
             self._gpascii.monitor_variables(variables, change_callback=got_value)
         else:
             self._gpascii.print_variables(variables, cb=got_value)
+
+    @magic_arguments()
+    @argument('phase_freq', type=float,
+              help='Phase clock frequency (in Hz)')
+    @argument('servo_divider', type=int,
+              help='Servo divider')
+    @argument('-a', '--accept', action='store_true',
+              help='')
+    def clock(self, magic_self, arg):
+        '''
+        Set the phase and servo clocks for the system
+
+        The servo frequency is calculated as follows:
+            servo_freq = phase_freq / (servo_divider + 1)
+
+        Without the --accept flag, the command is considered
+        a dry-run, and will only output the changes
+        '''
+
+        args = parse_argstring(self.clock, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        gpascii = self.comm.gpascii
+
+        devices = list(hardware.enumerate_hardware(gpascii))
+
+        phase_master, servo_master = clock_mod.get_clock_master(devices)
+        print('Phase clock master is', phase_master)
+        print('Servo clock master is', servo_master)
+        if not args.accept:
+            print('--- dry run ---')
+
+        clock_mod.set_global_phase(devices, args.phase_freq,
+                                   args.servo_divider,
+                                   dry_run=not args.accept,
+                                   verbose=True)
+
+        if not args.accept:
+            print('--- dry run ---')
 
 
 @PpmacExport

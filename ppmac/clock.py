@@ -104,7 +104,7 @@ def get_global_phase_script(devices, phase_freq, servo_divider,
 
 
 def set_global_phase(devices, phase_freq, servo_divider, verbose=True,
-                     **kwargs):
+                     dry_run=False, **kwargs):
     """
     Set the phase clock settings
 
@@ -128,7 +128,11 @@ def set_global_phase(devices, phase_freq, servo_divider, verbose=True,
                 else:
                     print('Sending %s' % line)
 
-            gpascii.send_line(line)
+            if not dry_run:
+                try:
+                    gpascii.send_line(line, sync=True)
+                except Exception as ex:
+                    print('* Failed: %s' % ex)
 
 
 def test():
