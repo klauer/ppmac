@@ -154,7 +154,7 @@ int main(int argc, char *argv[])
     }
 
     CloseLibrary();
-    return err;
+    return !err;
 
 printusage:
     printf("User phase loading tool\n");
