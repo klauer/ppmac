@@ -240,7 +240,7 @@ class GpasciiChannel(ShellChannel):
     Gpascii, the Power PMAC command interpreter
     """
 
-    CMD_GPASCII = 'gpascii -2'
+    CMD_GPASCII = 'gpascii -2 2>&1'
     EOT = '\04'
 
     def __init__(self, comm, command=None):
@@ -700,11 +700,19 @@ class PPComm(object):
         """
         return GpasciiChannel(self, command=cmd)
 
-    def gpascii_file(self, filename, **kwargs):
+    def gpascii_file(self, filename, check_errors=True, **kwargs):
         """
         Execute a gpascii script by remote filename
         """
-        return self.shell_command('gpascii -i"%s"' % filename, **kwargs)
+        ret = self.shell_command('gpascii -i"%s" 2>&1' % filename, **kwargs)
+        if not check_errors:
+            return ret
+
+        for line in ret:
+            if 'error' in line:
+                raise GPError(line)
+
+        return ret
 
     def shell_channel(self, cmd=None):
         """

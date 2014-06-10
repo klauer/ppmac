@@ -114,15 +114,16 @@ def parse_gather(addresses, lines):
         try:
             return [ast.literal_eval(num) for num in line]
         except Exception as ex:
-            print('Unable to parse gather results (%s): %s' %
-                  (ex.__class__.__name__, ex))
-            print('->', line)
-            return []
+            raise RuntimeError('Unable to parse gather results (%s): %s [%s]' %
+                               (ex.__class__.__name__, ex, line))
 
     count = len(addresses)
     data = [fix_line(line.split(' '))
             for line in lines
             if line.count(' ') == (count - 1)]
+
+    if len(data) == 0 and len(lines) > 2:
+        raise RuntimeError('Gather results inconsistent with settings file (wrong file or addresses incorrect?)')
 
     return data
 
@@ -137,8 +138,11 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
     settings = get_settings(servo_period, addresses, duration=duration,
                             gather_period=period)
 
-    if comm.write_file(gather_config_file, '\n'.join(settings)):
-        print('Wrote configuration to', gather_config_file)
+    settings = '\n'.join(settings)
+
+    comm.write_file(gather_config_file, settings)
+
+    print('Wrote configuration to: %s' % gather_config_file)
 
     comm.gpascii_file(gather_config_file)
 
@@ -208,7 +212,7 @@ def get_gather_results(comm, addresses, output_file=gather_output_file):
         # Use the Delta Tau-supplied 'gather' program
 
         # -u is for upload
-        comm.shell_command('gather %s -u' % (output_file, ))
+        comm.shell_command('gather "%s" -u' % (output_file, ))
 
         lines = [line.strip() for line in comm.read_file(output_file)]
         rows = parse_gather(addresses, lines)
@@ -394,8 +398,11 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
                             gather_period=period,
                             samples=samples)
 
-    if comm.write_file(gather_config_file, '\n'.join(settings)):
-        print('Wrote configuration to', gather_config_file)
+    settings = '\n'.join(settings)
+
+    comm.write_file(gather_config_file, settings)
+
+    print('Wrote configuration to', gather_config_file)
 
     comm.gpascii_file(gather_config_file, verbose=True)
 
