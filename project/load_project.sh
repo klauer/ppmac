@@ -36,7 +36,6 @@ echo "Compiling all C source..."
 #find . -name Makefile -exec dirname {} \; | xargs -I '{}' make -C {} clean
 find /var/ftp/usrflash -name Makefile -exec dirname {} \; | xargs -I '{}' make -C {}
 
-
 if [ -f $USRALGO ]
 then
     echo Removing kernel module: $USRALGO
@@ -44,11 +43,15 @@ then
     # 2> /dev/null
 fi
 
+find /var/ftp/usrflash -name Makefile -exec dirname {} \; | xargs -I '{}' make -C {} before_projpp
+
 # Load the project, but strip out control characters in the response
 run_command projpp
 echo
 
 grep -v -e "unknown escape sequence" -e "PMAC_PROJECT" -e "redefined" -e "location of the previous" /var/ftp/usrflash/Project/Log/pp_error.log | python -c "${PYSCRIPT}"
+
+find /var/ftp/usrflash -name Makefile -exec dirname {} \; | xargs -I '{}' make -C {} after_projpp
 
 if [ -f $USRALGO ]
 then
@@ -71,3 +74,4 @@ then
     run_command gpascii -i/var/ftp/usrflash/load_delay.cfg
     echo
 fi
+
