@@ -474,6 +474,8 @@ class PpmacCore(Configurable):
               help='Gather settings filename')
     @argument('delimiter', type=unicode, nargs='?', default='\t',
               help='Character(s) to put between columns (tab is default)')
+    @argument('-n', '--numpy', action='store_true',
+              help='Store in numpy format (no metadata/column information)')
     def gather_save(self, magic_args, arg):
         """
         Save gather data to a file
@@ -481,6 +483,12 @@ class PpmacCore(Configurable):
         If `filename` is not specified, the data will be output to stdout
         If `settings_file` is not specified, the default from ppmac_gather.py
             will be used.
+        If `--numpy` is used, the data will be saved in the numpy .npz format,
+        which can be easily loaded by:
+            import numpy as np
+            data = np.load('filename.npz')
+            data['addr']  # the gathered variable addresses
+            data['data']  # the gathered data
         """
         args = parse_argstring(self.gather_save, arg)
 
@@ -502,8 +510,16 @@ class PpmacCore(Configurable):
 
         if args.save_to is not None:
             print('Saving to', args.save_to)
-            gather.gather_data_to_file(args.save_to, addresses, data, delim=delim)
+            if args.numpy:
+                np.savez(args.save_to,
+                         addr=addresses, data=data)
+            else:
+                gather.gather_data_to_file(args.save_to, addresses, data, delim=delim)
         else:
+            if args.numpy:
+                print('Error: Must specify a filename for numpy data', file=sys.stderr)
+                return
+
             print(' '.join('%20s' % addr for addr in addresses))
             for line in data:
                 print(' '.join('%20s' % item for item in line))
