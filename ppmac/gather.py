@@ -179,9 +179,33 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
     return get_gather_results(comm, addresses, output_file)
 
 
+def get_columns(all_columns, data, *to_get):
+    if data is None or len(data) == 0:
+        return [np.zeros(1) for col in to_get]
+
+    if isinstance(data, list):
+        data = np.array(data)
+
+    all_columns = InsList(all_columns)
+    indices = [get_addr_index(all_columns, col)
+               for col in to_get]
+    return [data[:, idx] for idx in indices]
+
+
+def get_addr_index(addresses, addr):
+    try:
+        return int(addr)
+    except:
+        addr_a = '%s.a' % addr
+        if addr_a in addresses:
+            return addresses.index(addr_a)
+        else:
+            return addresses.index(addr)
+
+
 def _check_times(gpascii, addresses, rows):
     if 'Sys.ServoCount.a' in addresses:
-        idx = addresses.index('Sys.ServoCount.a')
+        idx = get_addr_index(addresses, 'Sys.ServoCount.a')
         servo_period = gpascii.servo_period
 
         times = [row[idx] for row in rows]
@@ -207,7 +231,6 @@ def get_gather_results(comm, addresses, output_file=gather_output_file):
         # Use the 'fast gather' server
         client = comm.fast_gather
         rows = client.get_rows()
-
     else:
         # Use the Delta Tau-supplied 'gather' program
 
@@ -229,7 +252,7 @@ def gather_data_to_file(fn, addr, data, delim='\t'):
 
 
 def plot(addr, data):
-    x_idx = addr.index('Sys.ServoCount.a')
+    x_idx = get_addr_index(addr, 'Sys.ServoCount.a')
 
     data = np.array(data)
     x_axis = data[:, x_idx] - data[0, x_idx]

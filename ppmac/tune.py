@@ -18,6 +18,7 @@ import numpy as np
 from .gather import get_gather_results
 from . import gather as gather_mod
 from . import pp_comm
+from .util import InsList
 
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -311,19 +312,6 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
     return ax1, ax2
 
 
-def get_columns(all_columns, data, *to_get):
-    if data is None or len(data) == 0:
-        return [np.zeros(1) for col in to_get]
-
-    to_get = [col.lower() for col in to_get]
-    all_columns = [col.lower() for col in all_columns]
-    if isinstance(data, list):
-        data = np.array(data)
-
-    indices = [all_columns.index(col) for col in to_get]
-    return [data[:, idx] for idx in indices]
-
-
 def tune_range(gpascii, script_file, parameter, values, **kwargs):
     motor = kwargs['motor1']
     if '.' not in parameter:
@@ -333,8 +321,8 @@ def tune_range(gpascii, script_file, parameter, values, **kwargs):
         desired_addr = 'motor[%d].despos.a' % motor
         actual_addr = 'motor[%d].actpos.a' % motor
 
-        desired, actual = get_columns(addrs, data,
-                                      desired_addr, actual_addr)
+        desired, actual = gather_mod.get_columns(addrs, data,
+                                                 desired_addr, actual_addr)
 
         err = desired - actual
         return np.sqrt(np.sum(err ** 2) / len(desired))
