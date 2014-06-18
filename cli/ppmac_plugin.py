@@ -38,7 +38,8 @@ import ppmac.hardware as hardware
 logger = logging.getLogger('PpmacCore')
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
-UTIL_PATH = '/var/ftp/usrflash'
+USRFLASH_PATH = '/var/ftp/usrflash'
+UTIL_PATH = os.path.join(USRFLASH_PATH, 'util')
 
 
 # Extension Initialization #
@@ -551,7 +552,6 @@ class PpmacCore(Configurable):
             return
 
         addresses = settings['gather.addr']
-        print(addresses)
         if '%s.a' % args.column in addresses:
             col = '%s.a' % args.column
         else:
@@ -1145,7 +1145,7 @@ class PpmacCore(Configurable):
     @argument('source_files', type=unicode, nargs='+',
               help='Source files')
     @argument('-d', '--dest', type=unicode, nargs='?',
-              default='/var/ftp/usrflash',
+              default=UTIL_PATH,
               help='Destination path for files')
     @argument('-r', '--run', type=unicode, nargs='*',
               default=None,
@@ -1218,12 +1218,12 @@ class PpmacCore(Configurable):
         self.comm.shell_command('lsmod |grep %s' % grep_text,
                                 verbose=True)
 
-        prog_path = os.path.join(UTIL_PATH, 'userphase')
+        prog_path = os.path.join(USRFLASH_PATH, 'userphase')
 
         if not self.comm.file_exists(prog_path):
             print('Building userphase utility (from userphase_util.c)')
             build_utility(self.comm, ['userphase_util.c'], 'userphase',
-                          dest_path=UTIL_PATH, verbose=True)
+                          dest_path=USRFLASH_PATH, verbose=True)
             print('Done.')
 
         print()
@@ -1576,6 +1576,9 @@ def create_util_makefile(source_files, output_name):
     make_path = os.path.join(MODULE_PATH, 'util_makefile')
     makefile = open(make_path, 'rt').read()
 
+    source_files = [fn for fn in source_files
+                    if os.path.splitext(fn)[1] not in ('.h', '.hpp')
+                    ]
     text = makefile % dict(source_files=' '.join(source_files),
                            output_name=output_name)
     return text
@@ -1596,6 +1599,11 @@ def build_utility(comm, source_files, output_name,
     dest_filenames = [os.path.join(dest_path, fn) for fn in filenames]
 
     makefile_text = create_util_makefile(filenames, output_name)
+
+    try:
+        comm.make_directory(dest_path)
+    except:
+        pass
 
     comm.write_file(os.path.join(dest_path, 'Makefile'), makefile_text)
     if verbose:

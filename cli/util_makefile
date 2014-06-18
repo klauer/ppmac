@@ -124,7 +124,7 @@ $(PROG): $(OBJS)
 	@echo "Cleaning up build directory."
 	@rm *.o
 
-$(OBJS): $(SRCS)
+%%.o: %%.c
 	@echo "Starting compilation."
 	$(CC) $(CFLAGS) $(INCLUDE) -c $<
 	@echo "Compilation complete."	

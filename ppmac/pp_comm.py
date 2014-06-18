@@ -803,6 +803,12 @@ class PPComm(object):
         """
         self.sftp.put(local, remote)
 
+    def make_directory(self, path):
+        """
+        Create a remote directory
+        """
+        self.sftp.mkdir(path)
+
     def write_file(self, filename, contents):
         """
         Write a remote file with the given contents via sftp
