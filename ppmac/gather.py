@@ -14,6 +14,7 @@ import time
 import re
 import sys
 import ast
+import struct
 import functools
 
 import matplotlib.pyplot as plt
@@ -190,6 +191,35 @@ def get_columns(all_columns, data, *to_get):
     indices = [get_addr_index(all_columns, col)
                for col in to_get]
     return [data[:, idx] for idx in indices]
+
+
+def save_interp(fn, addresses, data, col,
+                point_time=1000.0):
+    """
+    Save gather data to a simple binary file, interpolated over
+    a regularly spaced interval (defined by point_time usec)
+
+    Saves big endian, 32-bit integers
+    """
+    x, y = get_columns(addresses, data,
+                       'sys.servocount.a', col)
+
+    start_t = x[0]
+    end_t = x[-1]
+    step_t = 1e-6 * point_time
+    new_x = np.arange(start_t, end_t, step_t)
+
+    y = np.interp(new_x, x, y)
+
+    # Store as big endian
+    format_ = '>I'
+
+    with open(fn, 'wb') as f:
+        magic = (ord('I') << 16) + (ord('N') << 8) + ord('T')
+        f.write(struct.pack(format_, magic))
+        f.write(struct.pack(format_, len(y)))
+        f.write(struct.pack(format_, point_time))
+        y.astype(format_).tofile(f)
 
 
 def get_addr_index(addresses, addr):

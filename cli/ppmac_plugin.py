@@ -529,8 +529,8 @@ class PpmacCore(Configurable):
     @magic_arguments()
     @argument('save_to', type=unicode,
               help='Filename to save to')
-    @argument('column', type=unicode,
-              help='Column to save')
+    @argument('address', type=unicode,
+              help='Address name to save')
     @argument('point_time', type=int, default=100.0,
               help='Time, per point in table [microseconds]')
     @argument('settings_file', type=unicode, nargs='?',
@@ -554,35 +554,8 @@ class PpmacCore(Configurable):
             return
 
         addresses = settings['gather.addr']
-        if '%s.a' % args.column in addresses:
-            col = '%s.a' % args.column
-        else:
-            col = args.column
-
-        x, y = gather.get_columns(addresses, data,
-                                  'sys.servocount.a', col)
-
-        start_t = x[0]
-        end_t = x[-1]
-        step_t = 1e-6 * args.point_time
-        new_x = np.arange(start_t, end_t, step_t)
-
-        y = np.interp(new_x, x, y)
-
-        # if little_endian:
-        #     format_ = '<I'
-        # else:
-        #     format_ = '>I'
-
-        # Store as big endian
-        format_ = '>I'
-
-        with open(args.save_to, 'wb') as f:
-            magic = (ord('I') << 16) + (ord('N') << 8) + ord('T')
-            f.write(struct.pack(format_, magic))
-            f.write(struct.pack(format_, len(y)))
-            f.write(struct.pack(format_, args.point_time))
-            y.astype(format_).tofile(f)
+        gather.save_interp(args.save_to, addresses, data, args.address,
+                           point_time=args.point_time)
 
     def custom_tune(self, script, magic_args, range_var=None, range_values=None):
         if not self.check_comm():
