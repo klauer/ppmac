@@ -12,6 +12,7 @@ from __future__ import print_function
 import logging
 import os
 import sys
+import struct
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -524,6 +525,53 @@ class PpmacCore(Configurable):
             for line in data:
                 print(' '.join('%20s' % item for item in line))
 
+    @magic_arguments()
+    @argument('save_to', type=unicode,
+              help='Filename to save to')
+    @argument('column', type=unicode,
+              help='Column to save')
+    @argument('point_time', type=int, default=100.0,
+              help='Time, per point in table [microseconds]')
+    @argument('settings_file', type=unicode, nargs='?',
+              help='Gather settings filename')
+    def gather_saveinterp(self, magic_args, arg):
+        """
+        Save gather data to a simple binary file, interpolated over
+        a regularly spaced interval
+        """
+        args = parse_argstring(self.gather_saveinterp, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        try:
+            settings, data = self.get_gather_results(args.settings_file)
+        except KeyError as ex:
+            logger.error(ex)
+            return
+
+        addresses = settings['gather.addr']
+        print(addresses)
+        if '%s.a' % args.column in addresses:
+            col = '%s.a' % args.column
+        else:
+            col = args.column
+
+        x, y = gather.get_columns(addresses, data,
+                                  'sys.servocount.a', col)
+
+        start_t = x[0]
+        end_t = x[-1]
+        step_t = 1e-6 * args.point_time
+        new_x = np.arange(start_t, end_t, step_t)
+
+        y = np.interp(new_x, x, y)
+
+        with open(args.save_to, 'wb') as f:
+            f.write(struct.pack('<I', len(y)))
+            f.write(struct.pack('<I', args.point_time))
+            y.astype('int32').tofile(f)
+
     def custom_tune(self, script, magic_args, range_var=None, range_values=None):
         if not self.check_comm():
             return
@@ -612,8 +660,8 @@ class PpmacCore(Configurable):
             print('No data gathered?')
             return
 
-        cols = tune_mod.get_columns(addresses, data,
-                                    'sys.servocount.a', desired_addr, actual_addr)
+        cols = gather.get_columns(addresses, data,
+                                  'sys.servocount.a', desired_addr, actual_addr)
 
         x_axis, desired, actual = cols
 
@@ -679,18 +727,8 @@ class PpmacCore(Configurable):
         for address in addresses:
             print('\t%s' % address)
 
-        def fix_index(addr):
-            try:
-                return int(addr)
-            except:
-                addr_a = '%s.a' % addr
-                if addr_a in addresses:
-                    return addresses.index(addr_a)
-                else:
-                    return addresses.index(addr)
-
         try:
-            x_index = fix_index(args.x_axis)
+            x_index = gather.get_addr_index(addresses, args.x_axis)
         except:
             x_index = 0
 
@@ -704,12 +742,14 @@ class PpmacCore(Configurable):
                 right_indices.remove(x_index)
         else:
             try:
-                left_indices = [fix_index(addr) for addr in args.left]
+                left_indices = [gather.get_addr_index(addresses, addr)
+                                for addr in args.left]
             except TypeError:
                 left_indices = []
 
             try:
-                right_indices = [fix_index(addr) for addr in args.right]
+                right_indices = [gather.get_addr_index(addresses, addr)
+                                 for addr in args.right]
             except TypeError:
                 right_indices = []
 
@@ -1545,8 +1585,12 @@ def create_util_makefile(source_files, output_name):
 def build_utility(comm, source_files, output_name,
                   dest_path=UTIL_PATH,
                   verbose=False, cleanup=True,
-                  run=None, timeout=0.0,
+                  run=None, timeout=0.0, redirect_stderr=True,
                   **kwargs):
+
+    '''
+    If run is not None, use it as the command line arguments to execute **
+    '''
 
     filenames = [os.path.split(fn)[-1] for fn in source_files]
     dest_filenames = [os.path.join(dest_path, fn) for fn in filenames]
@@ -1589,5 +1633,11 @@ def build_utility(comm, source_files, output_name,
 
     if not errored and run is not None:
         run = ' '.join(run)
-        comm.shell_command('%s %s' % (output_name, run),
+
+        if redirect_stderr:
+            end = '2>&1'
+        else:
+            end = ''
+        comm.shell_command('%s %s%s' % (os.path.join(dest_path, output_name),
+                                        run, end),
                            timeout=None, verbose=True)
