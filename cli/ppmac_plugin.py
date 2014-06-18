@@ -539,6 +539,8 @@ class PpmacCore(Configurable):
         """
         Save gather data to a simple binary file, interpolated over
         a regularly spaced interval
+
+        Saves in big endian format, only supports integers
         """
         args = parse_argstring(self.gather_saveinterp, arg)
 
@@ -567,10 +569,20 @@ class PpmacCore(Configurable):
 
         y = np.interp(new_x, x, y)
 
+        # if little_endian:
+        #     format_ = '<I'
+        # else:
+        #     format_ = '>I'
+
+        # Store as big endian
+        format_ = '>I'
+
         with open(args.save_to, 'wb') as f:
-            f.write(struct.pack('<I', len(y)))
-            f.write(struct.pack('<I', args.point_time))
-            y.astype('int32').tofile(f)
+            magic = (ord('I') << 16) + (ord('N') << 8) + ord('T')
+            f.write(struct.pack(format_, magic))
+            f.write(struct.pack(format_, len(y)))
+            f.write(struct.pack(format_, args.point_time))
+            y.astype(format_).tofile(f)
 
     def custom_tune(self, script, magic_args, range_var=None, range_values=None):
         if not self.check_comm():

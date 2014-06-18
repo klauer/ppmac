@@ -1,8 +1,17 @@
 #include <stdio.h>
 #include <malloc.h>
+#include <arpa/inet.h>
 #include "dac_read.h"
 
 // vi: ts=2 sw=2
+
+inline 
+int is_little_endian()
+{
+  int i=1;
+  char c = *((char*)&i);
+  return (c == 1);
+}
 
 bool read_dac_file(const char *fn, DACData *df) {
   FILE *fp = fopen(fn, "rb");
@@ -20,6 +29,17 @@ bool read_dac_file(const char *fn, DACData *df) {
       free(df->table);
       df->table = NULL;
   }
+  
+  unsigned int magic;
+  if (fread(&magic, sizeof(unsigned int), 1, fp) <= 0) {
+    perror("unable to read file");
+    goto fail;
+  }
+  
+  if (ntohl(magic) != DACDATA_MAGIC) {
+    perror("file type not recognized");
+    goto fail;
+  }
 
   if (fread(&df->table_size, sizeof(unsigned int), 1, fp) <= 0) {
     perror("unable to read file");
@@ -30,7 +50,12 @@ bool read_dac_file(const char *fn, DACData *df) {
     perror("unable to read file");
     goto fail;
   }
+ 
+  df->scale_factor = ntohl(df->scale_factor);
+  df->table_size = ntohl(df->table_size);
 
+  printf("Scale factor: %d\n", df->scale_factor);
+  printf("Array size: %d\n", df->table_size);
   if (df->table_size == 0) {
     perror("empty dac table");
     goto fail;
@@ -45,9 +70,15 @@ bool read_dac_file(const char *fn, DACData *df) {
   if (fread(df->table, sizeof(int), df->table_size, fp) != df->table_size) {
     perror("unable to read table");
     goto fail;
-    return false;
   }
   
+  if (is_little_endian()) {
+    unsigned int i;
+    for (i=0; i < df->table_size; i++) {
+      df->table[i] = ntohl(df->table[i]);
+    }
+  }
+
   fclose(fp);
   return true;
 
