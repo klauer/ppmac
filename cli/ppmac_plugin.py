@@ -12,7 +12,6 @@ from __future__ import print_function
 import logging
 import os
 import sys
-import struct
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -989,13 +988,21 @@ class PpmacCore(Configurable):
               help='Motor number')
     @argument('text', default='', type=str, nargs='*',
               help='Text to search for (optional)')
+    @argument('-f', '--filename', type=str,
+              help='File to save to')
     def servo(self, magic_args, arg):
         """
+        Show/save servo settings for a motor
         """
         args = parse_argstring(self.servo, arg)
 
         if not args or not self.check_comm():
             return
+
+        if args.filename:
+            f = open(args.filename, 'wt')
+        else:
+            f = sys.stdout
 
         search_text = ' '.join(args.text).lower()
         for obj, value in tune_mod.get_settings(self._gpascii, args.motor,
@@ -1011,10 +1018,13 @@ class PpmacCore(Configurable):
                 line = '%15s = %s' % (obj, value)
 
             if not search_text:
-                print(line)
+                print(line, file=f)
             else:
                 if search_text in line.lower():
-                    print(line)
+                    print(line, file=f)
+
+        if not f is sys.stdout:
+            f.close()
 
     @magic_arguments()
     @argument('motor_from', default=1, type=int,
@@ -1259,58 +1269,22 @@ class PpmacCore(Configurable):
         if not args or not self.check_comm():
             return
 
-        gpascii = self.comm.gpascii
-        gpascii.send_line('&%dabort' % (args.coord, ))
-        gpascii.sync()
-
-        if args.filename:
-            print('Sending script: %s' % args.filename)
-            lines = open(args.filename, 'rt').readlines()
-            opening_lines = ['close all buffers',
-                             'open prog %d' % args.program]
-            closing_lines = ['close']
-
-            script = opening_lines + lines + closing_lines
-            if args.macro:
-                script = '\n'.join(script)
-                for macro in args.macro:
-                    variable, value = macro.split('=', 1)
-
-                    macro = '$(%s)' % variable
-                    script = script.replace(macro, value)
-
-                script = script.split('\n')
-
-            for line in script:
-                if line.rstrip():
-                    print(line.rstrip())
-                try:
-                    gpascii.send_line(line.strip())
-                except GPError as ex:
-                    print('Failed to send script: %s' % ex)
-                    return
-
-            gpascii.sync()
-
-        if args.motors:
-            coord = {}
+        motors = {}
+        if args.motors is not None:
             for m in args.motors:
                 axis, motor = m.split('=', 1)
-                motor = int(motor)
-                coord[motor] = axis
+                motors[int(motor)] = axis
 
-                # gpascii.send_line('&*#%d->0' % motor)
+        macros = {}
+        if args.macro is not None:
+            for m in args.macro:
+                variable, value = m.split('=', 1)
+                macros[variable] = value
 
-            coord = {args.coord: coord}
-            gpascii.set_coords(coord, verbose=True, undefine=True)
-
-        try:
-            gpascii.run_and_wait(args.coord, args.program, variables=args.variables)
-        except GPError as ex:
-            print(ex)
-            if 'READY TO RUN' in str(ex):
-                print('Are all motors in the coordinate system in closed loop?')
-            return
+        gpascii = self.comm.gpascii
+        prog_run(gpascii, coord=args.coord, program=args.program,
+                 variables=args.variables, macros=macros, motors=motors,
+                 filename=args.filename)
 
     @magic_arguments()
     @argument('variables', nargs='+', type=unicode,
@@ -1631,6 +1605,72 @@ def build_utility(comm, source_files, output_name,
             end = '2>&1'
         else:
             end = ''
+
         comm.shell_command('%s %s%s' % (os.path.join(dest_path, output_name),
                                         run, end),
                            timeout=None, verbose=True)
+
+
+def prog_run(gpascii, filename='', coord=0, program=1, variables=[],
+             motors={}, macros={}):
+    '''
+    Run a motion program in a coordinate system.
+
+    Optionally monitor variables (at a low rate) during execution
+
+    If filename is specified, the local script is first uploaded
+    before running
+
+    Motors can be specified in the form of
+        {motor_number: 'X'}  # (coordinate system axis X/Y/Z/etc)
+
+    If specified, the coordinate system will be cleared first and
+    all motors reassigned.
+
+    Macros are specified in the form of:
+        {variable: value}
+
+    Prior to evaluating the script, macros in the script file in
+    the form of '$(variable)' will be replaced with 'value'
+    '''
+    gpascii.send_line('&%dabort' % (coord, ))
+    gpascii.sync()
+
+    if filename:
+        print('Sending script: %s' % filename)
+        lines = open(filename, 'rt').readlines()
+        opening_lines = ['close all buffers',
+                         'open prog %d' % program]
+        closing_lines = ['close']
+
+        script = opening_lines + lines + closing_lines
+        if macros:
+            script = '\n'.join(script)
+            for variable, value in macros.items():
+                macro = '$(%s)' % variable
+                script = script.replace(macro, value)
+
+            script = script.split('\n')
+
+        for line in script:
+            if line.rstrip():
+                print(line.rstrip())
+            try:
+                gpascii.send_line(line.strip())
+            except GPError as ex:
+                print('Failed to send script: %s' % ex)
+                return
+
+        gpascii.sync()
+
+    if motors:
+        coords = {coord: motors}
+        gpascii.set_coords(coords, verbose=True, undefine_coord=True)
+
+    try:
+        gpascii.run_and_wait(coord, program, variables=variables)
+    except GPError as ex:
+        print(ex)
+        if 'READY TO RUN' in str(ex):
+            print('Are all motors in the coordinate system in closed loop?')
+        return
