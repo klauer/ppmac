@@ -129,7 +129,7 @@ def parse_gather(addresses, lines):
     return data
 
 
-def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
+def setup_gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
     comm = gpascii._comm
 
     servo_period = gpascii.servo_period
@@ -156,6 +156,15 @@ def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output
         print('* Warning: Buffer not large enough.')
         print('  Maximum count with the current addresses: %d' % (max_lines, ))
         print('  New duration is: %.2f s' % (duration, ))
+
+    return total_samples
+
+
+def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
+    comm = gpascii._comm
+
+    total_samples = setup_gather(gpascii, addresses, duration=duration, period=period,
+                                 output_file=output_file)
 
     gpascii.set_variable('gather.enable', 2)
     samples = 0
@@ -194,7 +203,7 @@ def get_columns(all_columns, data, *to_get):
 
 
 def save_interp(fn, addresses, data, col,
-                point_time=1000.0):
+                point_time=1000):
     """
     Save gather data to a simple binary file, interpolated over
     a regularly spaced interval (defined by point_time usec)
@@ -204,6 +213,7 @@ def save_interp(fn, addresses, data, col,
     x, y = get_columns(addresses, data,
                        'sys.servocount.a', col)
 
+    point_time = int(point_time)
     start_t = x[0]
     end_t = x[-1]
     step_t = 1e-6 * point_time
