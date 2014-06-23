@@ -681,8 +681,6 @@ class PpmacCore(Configurable):
               help='right axis addresses (or indices)')
     @argument('settings_file', type=unicode, nargs='?',
               help='Gather settings filename')
-    @argument('delimiter', type=unicode, nargs='?', default='\t',
-              help='Character(s) to put between columns (tab is default)')
     @argument('-L', '--left-scale', type=float, default=1.0,
               help='Scale data on the left axis by this')
     @argument('-R', '--right-scale', type=float, default=1.0,
@@ -691,6 +689,8 @@ class PpmacCore(Configurable):
               help='First data point is zero (relative mode)')
     @argument('-m', '--limits', action='store_true',
               help='Set same limits on both Y axes')
+    @argument('-f', '--fft', action='store_true',
+              help='Apply FFT to data prior to plotting')
     def gather_plot(self, magic_args, arg):
         """
         Plot the most recent gather data
@@ -713,7 +713,7 @@ class PpmacCore(Configurable):
 
         try:
             x_index = gather.get_addr_index(addresses, args.x_axis)
-        except:
+        except Exception as ex:
             x_index = 0
 
         if args.all:
@@ -757,7 +757,8 @@ class PpmacCore(Configurable):
                                         left_indices=left_indices,
                                         right_indices=right_indices,
                                         left_label=make_label(args.left),
-                                        right_label=make_label(args.right))
+                                        right_label=make_label(args.right),
+                                        fft=args.fft)
 
         if args.limits:
             ly1, ly2 = ax1.get_ylim()

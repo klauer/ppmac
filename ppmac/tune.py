@@ -18,7 +18,6 @@ import numpy as np
 from .gather import get_gather_results
 from . import gather as gather_mod
 from . import pp_comm
-from .util import InsList
 
 
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
@@ -280,13 +279,51 @@ def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, 
     print(exe, args)
 
 
+if not hasattr(np.fft, 'rfftfreq'):
+    def rfftfreq(n, d=1.0):
+        if not isinstance(n, int):
+            raise ValueError("n should be an integer")
+        val = 1.0 / (n * d)
+        N = n // 2 + 1
+        results = np.arange(0, N, dtype=int)
+        return results * val
+
+    np.fft.rfftfreq = rfftfreq
+
+
 def plot_custom(columns, data, left_indices=[], right_indices=[],
-                xlabel='Time (s)', left_label='',
+                xlabel='Time [s]', left_label='',
                 right_label='', x_index=0,
-                left_colors='bgc', right_colors='rmk'):
+                left_colors='bgc', right_colors='rmk',
+                fft=False):
+
     data = np.array(data)
 
     x_axis = data[:, x_index]
+
+    if fft:
+        all_indices = set(left_indices + right_indices)
+
+        start_x = x_axis[0]
+        end_x = x_axis[-1]
+        step_x = x_axis[1] - x_axis[0]
+        new_x = np.arange(start_x, end_x, step_x)
+
+        freqs = np.fft.rfftfreq(len(x_axis), step_x)
+
+        spectra = np.zeros((len(freqs), max(all_indices) + 1), dtype=float)
+        for col in all_indices:
+            interpolated = np.interp(new_x, x_axis, data[:, col])
+            fft = np.fft.rfft(interpolated)
+            spectra[:len(fft), col] = np.abs(fft) / len(fft)
+
+        # Remove DC component
+        if 0:
+            data = spectra[1:, :]
+            x_axis = freqs[1:]
+
+        if xlabel.startswith('Time'):
+            xlabel = 'Frequency [Hz]'
 
     fig, ax1 = plt.subplots()
     if left_indices:
@@ -303,7 +340,7 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
         ax2 = ax1.twinx()
         for idx, color in zip(right_indices, right_colors):
             ax2.plot(x_axis, data[:, idx], color, label=columns[idx],
-                     alpha=0.2)
+                     alpha=0.4)
         ax2.set_ylabel(right_label)
         for tr in ax2.get_yticklabels():
             tr.set_color(right_colors[0])
