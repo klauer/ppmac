@@ -110,7 +110,7 @@ def read_settings_file(comm, fn=None):
     return settings
 
 
-def parse_gather(addresses, lines):
+def parse_gather(addresses, lines, delim=' '):
     def fix_line(line):
         try:
             return [ast.literal_eval(num) for num in line]
@@ -119,9 +119,9 @@ def parse_gather(addresses, lines):
                                (ex.__class__.__name__, ex, line))
 
     count = len(addresses)
-    data = [fix_line(line.split(' '))
+    data = [fix_line(line.split(delim))
             for line in lines
-            if line.count(' ') == (count - 1)]
+            if line.count(delim) == (count - 1)]
 
     if len(data) == 0 and len(lines) > 2:
         raise RuntimeError('Gather results inconsistent with settings file (wrong file or addresses incorrect?)')
@@ -202,13 +202,16 @@ def get_columns(all_columns, data, *to_get):
     return [data[:, idx] for idx in indices]
 
 
+INTERP_MAGIC = (ord('I') << 16) + (ord('N') << 8) + ord('T')
+
+
 def save_interp(fn, addresses, data, col,
-                point_time=1000):
+                point_time=1000, format_='I'):
     """
     Save gather data to a simple binary file, interpolated over
     a regularly spaced interval (defined by point_time usec)
 
-    Saves big endian, 32-bit integers
+    Saves big endian, 32-bit unsigned integers (by default)
     """
     x, y = get_columns(addresses, data,
                        'sys.servocount.a', col)
@@ -222,14 +225,41 @@ def save_interp(fn, addresses, data, col,
     y = np.interp(new_x, x, y)
 
     # Store as big endian
-    format_ = '>I'
+    format_ = '>%s' % format_
 
     with open(fn, 'wb') as f:
-        magic = (ord('I') << 16) + (ord('N') << 8) + ord('T')
-        f.write(struct.pack(format_, magic))
+        f.write(struct.pack(format_, INTERP_MAGIC))
         f.write(struct.pack(format_, len(y)))
         f.write(struct.pack(format_, point_time))
         y.astype(format_).tofile(f)
+
+
+def load_interp(fn, format_='I'):
+    """
+    Load gather data from an interpolated binary file (see save_interp)
+    """
+
+    header_st = struct.Struct('>III')
+    with open(fn, 'rb') as f:
+        header = f.read(header_st.size)
+        magic, points, point_time = header_st.unpack(header)
+
+        if magic != INTERP_MAGIC:
+            raise RuntimeError('Invalid file (magic=%x should be=%x)' %
+                               (magic, INTERP_MAGIC))
+
+        raw_data = f.read()
+
+    # Stored as big endian
+    format_ = '>%d%s' % (points, format_)
+
+    data = struct.unpack(format_, raw_data)
+
+    point_time = 1.e-6 * point_time
+    t_end = point_time * points
+    t = np.arange(0, t_end, point_time)
+
+    return t, np.array(data)
 
 
 def get_addr_index(addresses, addr):
@@ -289,6 +319,16 @@ def gather_data_to_file(fn, addr, data, delim='\t'):
         for line in data:
             line = ['%s' % s for s in line]
             print(delim.join(line), file=f)
+
+
+def gather_data_from_file(fn, delim='\t'):
+    with open(fn, 'rt') as f:
+        addresses = f.readline()
+        addresses = addresses.strip().split(delim)
+
+        lines = [line.strip() for line in f.readlines()]
+
+    return addresses, parse_gather(addresses, lines, delim=delim)
 
 
 def plot(addr, data):
