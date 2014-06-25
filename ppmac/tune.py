@@ -295,7 +295,7 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
                 xlabel='Time [s]', left_label='',
                 right_label='', x_index=0,
                 left_colors='bgc', right_colors='rmk',
-                fft=False):
+                fft=False, fft_remove_dc=True):
 
     data = np.array(data)
 
@@ -318,9 +318,12 @@ def plot_custom(columns, data, left_indices=[], right_indices=[],
             spectra[:len(fft), col] = np.abs(fft) / len(fft)
 
         # Remove DC component
-        if 0:
+        if fft_remove_dc:
             data = spectra[1:, :]
             x_axis = freqs[1:]
+        else:
+            data = spectra
+            x_axis = freqs
 
         if xlabel.startswith('Time'):
             xlabel = 'Frequency [Hz]'

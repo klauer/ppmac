@@ -554,6 +554,21 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
     return gather_vars, data
 
 
+def check_servocapt_rollover(scapt, rollover=1e6):
+    ret = np.zeros(len(scapt), dtype=float)
+    last_raw = scapt[0]
+    offset = 0
+    for i, raw_s in enumerate(scapt):
+        if abs(raw_s - last_raw) > rollover:
+            offset += last_raw - raw_s
+
+        ret[i] = offset + raw_s
+
+        last_raw = raw_s
+
+    return ret
+
+
 def main():
     addr = ['Sys.ServoCount.a',
             'Motor[3].Pos.a',
