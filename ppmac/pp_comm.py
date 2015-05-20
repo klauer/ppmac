@@ -22,11 +22,10 @@ import paramiko
 from . import const
 
 try:
-    from . import fast_gather as gather_client
+    from . import fast_gather as fast_gather_mod
 except ImportError as ex:
-    gather_client = None
+    fast_gather_mod = None
     print('Unable to load the fast gather module: %s' % ex, file=sys.stderr)
-
 
 PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
 PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
@@ -677,7 +676,7 @@ class PPComm(object):
         self._user = user
         self._pass = password
 
-        self._fast_gather = fast_gather and (gather_client is not None)
+        self._fast_gather = fast_gather and (fast_gather_mod is not None)
         self._fast_gather_port = fast_gather_port
         self._gather_client = None
 
@@ -828,7 +827,7 @@ class PPComm(object):
             return None
 
         if self._gather_client is None:
-            client = self._gather_client = gather_client.GatherClient()
+            client = self._gather_client = fast_gather_mod.GatherClient()
             try:
                 client.connect((self._host, self._fast_gather_port))
             except Exception as ex:
