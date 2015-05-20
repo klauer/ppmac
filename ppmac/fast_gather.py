@@ -1,8 +1,8 @@
 """
-:mod:`gather_client` -- fast_gather client
+:mod:`ppmac.fast_gather` -- fast_gather client
 ==========================================
 
-.. module:: gather_client
+.. module:: fast_gather
    :synopsis: GatherClient connects to a TCP server running on the Power PMAC called fast_gather.
        It requests the type information and the raw gather data from the server. Conversion
        to native Python types is then done.
