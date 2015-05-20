@@ -1,3 +1,9 @@
+Debian multiarch for 64-bit machines:
+    sudo apt-get install multiarch-support
+    sudo apt-get --add-architecture i386
+    sudo apt-get update
+    sudo apt-get install ia32-libs
+
 Install ELDK:
     download ppc-2008-04-01_amcc.iso
     mount -o loop *.iso install_cd
@@ -47,10 +53,10 @@ no need to rebuild it), prepared it with xenomai to fix the soft links:
     # just rebuild the scripts directory for the necessary utilities
     make scripts
 
-kernel module builds with this makefile:
+kernel module builds with this makefile, assuming ppmac stuff is in ~/ppmac:
 
 ARCH=powerpc
-PPMAC_ROOT=~/ppmac
+PPMAC_ROOT=$(HOME)/ppmac
 PATH=$(PPMAC_ROOT)/eldk/usr/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 CROSS_COMPILE=ppc_4xxFP-
 KDIR=$(PPMAC_ROOT)/src/linux
