@@ -86,7 +86,7 @@ class PpmacCore(Configurable):
     instance = None
 
     ide_host = traitlets.Unicode('10.0.0.6', config=True)
-    host = traitlets.Unicode('10.0.0.98', config=True)
+    host = traitlets.Unicode('10.3.2.115', config=True)
     port = traitlets.Int(22, config=True)
     user = traitlets.Unicode('root', config=True)
     password = traitlets.Unicode('deltatau', config=True)
@@ -202,6 +202,8 @@ class PpmacCore(Configurable):
         if self.use_completer_db:
             self.completer = None
             self.open_completer_db()
+
+        self.shell.user_ns['conn'] = self.comm.gpascii
 
     def check_comm(self):
         if self.comm is None:
@@ -1529,6 +1531,24 @@ class PpmacCore(Configurable):
 
         if not args.accept:
             print('--- dry run ---')
+
+    @magic_arguments()
+    @argument('device', type=str,
+              help='')
+    @argument('channels', type=int,
+              help='')
+    @argument('dacs', type=int,
+              help='')
+    def dac(self, magic_self, arg):
+        args = parse_argstring(self.dac, arg)
+
+        if not args or not self.check_comm():
+            return
+
+        for chan in range(args.channels):
+            for dac in range(args.dacs):
+                dac_chan = '%s.Chan[%d].Dac[%d]' % (args.device, chan, dac)
+                self.get_verbose(dac_chan)
 
 
 @PpmacExport

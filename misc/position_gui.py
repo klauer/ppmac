@@ -22,7 +22,7 @@ MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(MODULE_PATH, '..'))
 from ppmac import pp_comm
 
-PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
+PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.3.2.115')
 PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
 PPMAC_USER = os.environ.get('PPMAC_USER', 'root')
 PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
