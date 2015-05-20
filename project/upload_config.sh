@@ -43,6 +43,6 @@ echo "--- Copying project, PLCs"
 echo python make_project.py ${PPMAC_TEMPDIR} ${PPMAC_FILES}
 python make_project.py ${PPMAC_TEMPDIR} ${PPMAC_FILES}
 sshpass -p $PPMAC_PW rsync -az ${PPMAC_TEMPDIR}/* root@${PPMAC_IP}:/var/ftp/usrflash
-sshpass -p $PPMAC_PW ssh root@${PPMAC_IP} "chmod 755 /var/ftp/usrflash/load_project.sh; /var/ftp/usrflash/load_project.sh"
+sshpass -p $PPMAC_PW ssh root@${PPMAC_IP} "chmod 755 /var/ftp/usrflash/load_project.sh; /var/ftp/usrflash/load_project.sh '$(date)'"
 
 echo "--- Done"

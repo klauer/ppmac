@@ -1,5 +1,12 @@
 #!/bin/bash
 
+# no ntpdate on the machine unfortunately
+DATE=$1
+if [ -n "$DATE" ]; then
+    echo "Setting date to $DATE..."
+    date --set="$DATE"
+fi
+
 PRE_MAKE_CFG=/var/ftp/usrflash/pre_make.cfg
 POST_MAKE_CFG=/var/ftp/usrflash/post_make.cfg
 USRALGO=/var/ftp/usrflash/usralgo.ko
@@ -74,4 +81,3 @@ then
     run_command gpascii -i/var/ftp/usrflash/load_delay.cfg
     echo
 fi
-
