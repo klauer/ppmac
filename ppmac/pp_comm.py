@@ -49,12 +49,14 @@ class GPError(PPCommError):
     pass
 
 
-comm_logger = logging.getLogger('ppmac.Comm')
-# comm_logger.setLevel(logging.DEBUG)
+logger = logging.getLogger(__name__)
 
-#logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-#                    datefmt='%m-%d %H:%M',
-#                    )
+if False:
+    logger.setLevel(logging.DEBUG)
+
+    logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                        datefmt='%m-%d %H:%M',
+                        )
 
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
@@ -124,10 +126,6 @@ class ShellChannel(object):
         if command is not None:
             self.send_line(command)
 
-    @property
-    def _logger(self):
-        return comm_logger
-
     def wait_for(self, wait_pattern, timeout=5.0, verbose=False,
                  remove_matching=[], **kwargs):
         """
@@ -157,7 +155,7 @@ class ShellChannel(object):
             raise PPCommChannelClosed()
 
         with self.lock:
-            self._logger.debug('Sync')
+            logger.debug('Sync')
 
             try:
                 for line in self.read_timeout(timeout=timeout):
@@ -203,7 +201,7 @@ class ShellChannel(object):
                     for line in lines:
                         if verbose:
                             print(line)
-                        self._logger.debug('<- %s' % line)
+                        logger.debug('<- %s' % line)
                         yield line.rstrip()
 
                 else:
@@ -212,7 +210,7 @@ class ShellChannel(object):
                 if channel.recv_stderr_ready():
                     line = channel.recv_stderr(1024)
                     print('<stderr- %s' % line, end='')
-                    self._logger.debug('<stderr- %s' % line)
+                    logger.debug('<stderr- %s' % line)
 
             if timeout > 0:
                 raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
@@ -226,7 +224,7 @@ class ShellChannel(object):
             raise PPCommChannelClosed()
 
         with self.lock:
-            self._logger.debug('-> %s' % line)
+            logger.debug('-> %s' % line)
             channel.send('%s%s' % (line, delim))
 
         if sync:
@@ -287,7 +285,7 @@ class GpasciiChannel(ShellChannel):
             for line in self.read_timeout(timeout=timeout):
                 if 'error' in line:
                     raise GPError(line)
-                #print('<-', line)
+
                 if '=' in line:
                     vname, value = line.split('=', 1)
                     if var == vname.lower():
@@ -372,7 +370,6 @@ class GpasciiChannel(ShellChannel):
                 if 'error' in line:
                     raise GPError(line)
 
-                #print('<-', line)
                 if '#' in line:
                     # <- &2#1->x
                     # ('&2', '2', '1', 'x')
@@ -576,7 +573,10 @@ class GpasciiChannel(ShellChannel):
                             if verbose:
                                 print('%s = %s' % (var, new_value))
                             if change_callback is not None:
-                                change_callback(var, old_value, new_value)
+                                try:
+                                    change_callback(var, old_value, new_value)
+                                except Exception as ex:
+                                    logger.error('Change callback failed', exc_info=ex)
 
                     last_values = values
 
@@ -585,6 +585,8 @@ class GpasciiChannel(ShellChannel):
                 if verbose:
                     print("Aborting...")
                 self.program(coord_sys, program, stop=True)
+
+            raise
 
         if verbose:
             print('Done (%s = %s)' % (active_var, get_active()))
