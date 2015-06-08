@@ -22,6 +22,11 @@ import socket
 import struct
 import time
 
+try:
+    import numpy as np
+except ImportError:
+    np = None
+
 
 def conv_uint24(b):
     return struct.unpack('>I', ''.join(('\x00', b[0], b[1], b[2])))[0]
@@ -267,7 +272,7 @@ class GatherClient(TCPSocket):
 
         return self._parse_raw_data(types, raw_data)
 
-    def get_columns(self):
+    def get_columns(self, as_numpy=False):
         """
         Query the server for all gather data, and pack it into columns
 
@@ -276,11 +281,14 @@ class GatherClient(TCPSocket):
                   ...]
 
         """
-        data, n_items, samples = self._query_all()
+        if as_numpy and np:
+            return self.get_rows(as_numpy=as_numpy).T
+        else:
+            data, n_items, samples = self._query_all()
 
-        return [data[i::n_items] for i in range(n_items)]
+            return [data[i::n_items] for i in range(n_items)]
 
-    def get_rows(self):
+    def get_rows(self, as_numpy=False):
         """
         Query the server for all gather data, and pack it into rows
 
@@ -290,13 +298,16 @@ class GatherClient(TCPSocket):
         """
         data, n_items, samples = self._query_all()
 
-        ret = []
-        j = 0
-        for i in range(samples):
-            ret.append(data[j:j + n_items])
-            j += n_items
+        if as_numpy and np:
+            return np.asarray(data).reshape(samples, n_items)
+        else:
+            ret = []
+            j = 0
+            for i in range(samples):
+                ret.append(data[j:j + n_items])
+                j += n_items
 
-        return ret
+            return ret
 
 
 def test(host='10.0.0.98', port=2332):
@@ -307,7 +318,7 @@ def test(host='10.0.0.98', port=2332):
 
     t0 = time.time()
     s.set_servo_mode()
-    #s.set_phase_mode()
+    # s.set_phase_mode()
     cols = s.get_columns()
     t1 = time.time() - t0
 
