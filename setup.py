@@ -13,5 +13,5 @@ setup(name='ppmac',
       version='0.0.1',
       author='klauer',
       packages=['ppmac'],
-      install_requires=['paramiko>=1.13', 'numpy>=1.8'],
+      install_requires=['paramiko>=1.13', 'numpy>=1.8', 'six'],
       )

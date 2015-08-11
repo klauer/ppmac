@@ -11,12 +11,12 @@
 """
 
 from __future__ import print_function
-import os
 import re
 import sys
 import time
 import logging
 import threading
+import six
 
 import paramiko
 
@@ -169,8 +169,8 @@ class ShellChannel(object):
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
         """
-        Generator which reads lines from the channel,
-        optionally outputting the lines to stdout (if verbose=True)
+        Generator which reads lines from the channel, optionally outputting the
+        lines to stdout (if verbose=True)
         """
         channel = self._channel
         if channel is None:
@@ -187,7 +187,11 @@ class ShellChannel(object):
 
             while channel.recv_ready() or check_timeout():
                 if channel.recv_ready():
-                    buf += channel.recv(1024)
+                    if six.PY3:
+                        buf += channel.recv(1024).decode('ascii')
+                    else:
+                        buf += channel.recv(1024)
+
                     lines = buf.split(delim)
                     if not buf.endswith(delim):
                         buf = lines[-1]
@@ -251,8 +255,11 @@ class GpasciiChannel(ShellChannel):
         Close the gpascii connection
         """
         channel = self._channel
-        self.sync()
-        channel.send(self.EOT)
+
+        if channel is not None and not channel.closed:
+            self.sync()
+            channel.send(self.EOT)
+            self._channel = None
 
     __del__ = close
 
@@ -776,12 +783,15 @@ class PPComm(object):
 
         return self._sftp
 
-    def read_file(self, filename):
+    def read_file(self, filename, encoding='ascii'):
         """
         Read a remote file, result is a list of lines
         """
         with self.sftp.file(filename, 'rb') as f:
-            return f.readlines()
+            if encoding is None:
+                return f.readlines()
+            else:
+                return [line.decode(encoding) for line in f.readlines()]
 
     def file_exists(self, remote):
         """
@@ -869,18 +879,21 @@ def main():
     chan.set_coords(coords)
 
     # chan = comm.shell_channel()
-    passwd = comm.read_file('/etc/passwd')
+    passwd = comm.read_file('/etc/passwd', encoding='ascii')
+
     tmp_file = '/tmp/blah'
 
     comm.write_file(tmp_file, ''.join(passwd))
 
     assert(comm.file_exists(tmp_file))
 
-    read_ = comm.read_file(tmp_file)
+    read_ = comm.read_file(tmp_file, encoding='ascii')
+
     assert(passwd == read_)
 
     assert(comm.file_exists('/etc/passwd'))
     assert(not comm.file_exists('/asdlfkja'))
+    return comm
 
 if __name__ == '__main__':
-    main()
+    comm = main()
