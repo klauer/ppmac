@@ -23,11 +23,15 @@ import paramiko
 from . import const
 from . import config
 
+
+logger = logging.getLogger(__name__)
+
+
 try:
     from . import fast_gather as fast_gather_mod
 except ImportError as ex:
     fast_gather_mod = None
-    print('Unable to load the fast gather module: %s' % ex, file=sys.stderr)
+    logger.warning('Unable to load the fast gather module', exc_info=ex)
 
 
 class PPCommError(Exception):
@@ -46,19 +50,24 @@ class GPError(PPCommError):
     pass
 
 
-logger = logging.getLogger(__name__)
-
-if False:
-    logger.setLevel(logging.DEBUG)
-
-    logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
-                        datefmt='%m-%d %H:%M',
-                        )
-
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
                   re.compile('^\/\/ \*\*\* EOF'),
                   ]
+
+
+def vlog(verbose, *args, **kwargs):
+    '''Verbose logging
+
+    Print output to kwarg `file` if `verbose` is set
+
+    Outputs to the module logger at the debug level in all cases
+    '''
+    if verbose:
+        print(*args, **kwargs)
+
+    kwargs.pop('file', '')
+    logger.debug(*args, **kwargs)
 
 
 def _wait_for(generator, wait_pattern,
@@ -80,8 +89,7 @@ def _wait_for(generator, wait_pattern,
         if rstrip:
             line = line.rstrip()
 
-        if verbose:
-            print(line)
+        vlog(verbose, line)
 
         if line == wait_pattern:
             yield line, []
@@ -159,13 +167,11 @@ class ShellChannel(object):
                     if 'error' in line:
                         raise GPError(line)
 
-                    if verbose:
-                        print(line)
+                    vlog(verbose, line)
             except TimeoutError:
                 pass
 
-            if verbose:
-                print()
+            vlog(verbose, '')
 
     def read_timeout(self, timeout=5.0, delim='\r\n', verbose=False):
         """
@@ -200,9 +206,7 @@ class ShellChannel(object):
                         buf = ''
 
                     for line in lines:
-                        if verbose:
-                            print(line)
-                        logger.debug('<- %s' % line)
+                        vlog(verbose, '<- %s' % line)
                         yield line.rstrip()
 
                 else:
@@ -210,8 +214,7 @@ class ShellChannel(object):
 
                 if channel.recv_stderr_ready():
                     line = channel.recv_stderr(1024)
-                    print('<stderr- %s' % line, end='')
-                    logger.debug('<stderr- %s' % line)
+                    vlog(verbose, '<stderr- %s' % line)
 
             if timeout > 0:
                 raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
@@ -448,8 +451,7 @@ class GpasciiChannel(ShellChannel):
 
             max_coord = max(coords.keys())
             if max_coord > self.get_variable('sys.maxcoords', type_=int):
-                if verbose:
-                    print('Increasing maxcoords to %d' % (max_coord + 1))
+                vlog(verbose, 'Increasing maxcoords to %d' % (max_coord + 1))
                 self.set_variable('sys.maxcoords', max_coord + 1)
 
             # Abort any running programs in coordinate systems
@@ -482,9 +484,8 @@ class GpasciiChannel(ShellChannel):
             for coord, motors in coords.items():
                 for motor, assigned in motors.items():
                     assign_line = '&%d#%d->%s' % (coord, motor, assigned)
-                    if verbose:
-                        print('Coordinate system %d: motor %d is %s' %
-                              (coord, motor, assigned))
+                    vlog(verbose, 'Coordinate system %d: motor %d is %s' %
+                         (coord, motor, assigned))
 
                     try:
                         self.send_line(assign_line, sync=True)
@@ -497,12 +498,10 @@ class GpasciiChannel(ShellChannel):
                     motors = [(num, axis.lower()) for num, axis in motors.items()]
                     motors_current = [(num, axis.lower()) for num, axis in current[coord].items()]
                     if set(motors) != set(motors_current):
-                        if verbose:
-                            print(motors, motors_current)
+                        vlog(verbose, motors, motors_current)
                         raise ValueError('Motors in coord system %d differ' % (coord, ))
 
-        if verbose:
-            print('Done')
+        vlog(verbose, 'Done')
 
     def program(self, coord_sys, program,
                 stop=None, start=None, line_label=None):
@@ -546,8 +545,7 @@ class GpasciiChannel(ShellChannel):
         if active_var is None:
             active_var = 'Coord[%d].ProgActive' % program
 
-        if verbose:
-            print('Coord %d Program %d' % (coord_sys, program))
+        vlog(verbose, 'Coord %d Program %d' % (coord_sys, program))
 
         active_var = 'Coord[%d].ProgActive' % coord_sys
 
@@ -574,32 +572,30 @@ class GpasciiChannel(ShellChannel):
                     for var, old_value, new_value in zip(variables,
                                                          last_values, values):
                         if old_value != new_value:
-                            if verbose:
-                                print('%s = %s' % (var, new_value))
+                            vlog(verbose, '%s = %s' % (var, new_value))
                             if change_callback is not None:
                                 try:
                                     change_callback(var, old_value, new_value)
                                 except Exception as ex:
-                                    logger.error('Change callback failed', exc_info=ex)
+                                    logger.error('Change callback failed',
+                                                 exc_info=ex)
 
                     last_values = values
 
         except KeyboardInterrupt:
             if get_active():
-                if verbose:
-                    print("Aborting...")
+                vlog(verbose, "Aborting...")
                 self.program(coord_sys, program, stop=True)
 
             raise
 
-        if verbose:
-            print('Done (%s = %s)' % (active_var, get_active()))
+        vlog(verbose, 'Done (%s = %s)' % (active_var, get_active()))
 
         error_status = 'Coord[%d].ErrorStatus' % coord_sys
         errno = self.get_variable(error_status, type_=int)
 
         if errno in const.coord_errors and verbose:
-            print('Error: (%s) %s' % (const.coord_errors[errno]))
+            logger.error('Error: %s', const.coord_errors[errno])
 
         return errno
 
@@ -749,7 +745,7 @@ class PPComm(object):
                         break
 
                 if not skip:
-                    print(line.rstrip())
+                    vlog(verbose, line.rstrip())
                     ret.append(line)
 
             return ret
@@ -840,7 +836,7 @@ class PPComm(object):
             try:
                 client.connect((self._host, self._fast_gather_port))
             except Exception as ex:
-                print('Fast gather client disabled (%s) %s' % (ex.__class__.__name__, ex))
+                logger.error('Fast gather client disabled', exc_info=ex)
                 self._fast_gather = False
                 self._gather_client = None
             else:
@@ -872,9 +868,9 @@ class CoordinateSave(object):
 def main():
     comm = PPComm()
     chan = comm.gpascii_channel()
-    print('channel opened')
+    print('[test] channel opened')
     coords = chan.get_coords()
-    print('coords are', coords)
+    print('[test] coords are', coords)
     # coords = {1: {11: 'x'}, 2: {12: 'x'}, 3: {1: 'x'}}
     chan.set_coords(coords)
 
@@ -896,4 +892,9 @@ def main():
     return comm
 
 if __name__ == '__main__':
+    logger.setLevel(logging.DEBUG)
+
+    logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+                        datefmt='%m-%d %H:%M',
+                        )
     comm = main()

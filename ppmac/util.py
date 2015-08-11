@@ -8,9 +8,11 @@
 
 """
 
+from __future__ import print_function
 import logging
 import functools
 import math
+import inspect
 
 
 class InsList(list):
@@ -157,7 +159,10 @@ def export_class_magic(ipython, instance):
 
 
 def tracking_filter(cutoff_freq, damping_ratio=0.7, servo_period=0.442673749446657994):
-    #Tf = 1 / (2. * pi * cutoff_freq)
+    '''
+    Calculate tracking filter according to power pmac manual
+    '''
+    # Tf = 1 / (2. * pi * cutoff_freq)
     wn = 2 * math.pi * cutoff_freq
     Ts = servo_period
     Kp = index2 = 256. - 512. * damping_ratio * wn * Ts
@@ -234,3 +239,26 @@ class WpKeySave(SaveVariable):
     @property
     def current_value(self):
         return '$%X' % self._gpascii.get_variable(self._variable, type_=int)
+
+
+def get_caller_module():
+    curframe = inspect.currentframe()
+    calframe = inspect.getouterframes(curframe, 2)
+    caller_frame = calframe[2][0]
+    return inspect.getmodule(caller_frame)
+
+
+def vlog(verbose, *args, **kwargs):
+    '''Verbose logging
+
+    Print output to kwarg `file` if `verbose` is set
+
+    Gets the module's logger and outputs at the debug level in all cases
+    '''
+    if verbose:
+        print(*args, **kwargs)
+
+    mlogger = logging.getLogger(get_caller_module().__name__)
+
+    kwargs.pop('file', '')
+    mlogger.debug(*args, **kwargs)
