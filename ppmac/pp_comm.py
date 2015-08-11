@@ -672,7 +672,7 @@ class PPComm(object):
 
     def __init__(self, host=config.hostname, port=config.port,
                  user=config.username, password=config.password,
-                 fast_gather=False, fast_gather_port=2332):
+                 fast_gather=False, fast_gather_port=config.fast_gather_port):
         self._host = host
         self._port = port
         self._user = user

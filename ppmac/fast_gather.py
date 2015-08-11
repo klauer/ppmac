@@ -3,16 +3,16 @@
 ==========================================
 
 .. module:: fast_gather
-   :synopsis: GatherClient connects to a TCP server running on the Power PMAC called fast_gather.
-       It requests the type information and the raw gather data from the server. Conversion
-       to native Python types is then done.
+   :synopsis: GatherClient connects to a TCP server running on the Power PMAC
+       called fast_gather.  It requests the type information and the raw gather
+       data from the server. Conversion to native Python types is then done.
 
-       Note that prior information about the gather addresses may be required to understand
-       the gathered data. This is because the addresses listed in Gather.Addr[] or
-       Gather.PhaseAddr[] are numeric and not descriptive.
+       Note that prior information about the gather addresses may be required
+       to understand the gathered data. This is because the addresses listed in
+       Gather.Addr[] or Gather.PhaseAddr[] are numeric and not descriptive.
 
-       Overall, this is significantly faster than working with the Power PMAC gather program
-       which dumps out tab-delimited strings to a file.
+       Overall, this is significantly faster than working with the Power PMAC
+       gather program which dumps out tab-delimited strings to a file.
 .. moduleauthor:: K Lauer <klauer@bnl.gov>
 
 """
@@ -21,11 +21,9 @@ from __future__ import print_function
 import socket
 import struct
 import time
+import numpy as np
 
-try:
-    import numpy as np
-except ImportError:
-    np = None
+from . import config
 
 
 def conv_uint24(b):
@@ -57,7 +55,8 @@ GATHER_TYPES = {
 }
 
 # TODO: uint24/int24 are untested -- assuming they are still stored in 4 bytes
-# TODO: ubits/sbits -- not even sure what they are (unsigned/signed bits?) or their size
+# TODO: ubits/sbits -- not even sure what they are (unsigned/signed bits?) or
+#       their size
 
 
 class TCPSocket(object):
@@ -298,7 +297,7 @@ class GatherClient(TCPSocket):
         """
         data, n_items, samples = self._query_all()
 
-        if as_numpy and np:
+        if as_numpy:
             return np.asarray(data).reshape(samples, n_items)
         else:
             ret = []
@@ -310,7 +309,7 @@ class GatherClient(TCPSocket):
             return ret
 
 
-def test(host='10.0.0.98', port=2332):
+def test(host=config.hostname, port=config.fast_gather_port):
     port = int(port)
 
     s = GatherClient()
