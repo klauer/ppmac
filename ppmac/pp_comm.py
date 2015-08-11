@@ -19,18 +19,15 @@ import logging
 import threading
 
 import paramiko
+
 from . import const
+from . import config
 
 try:
     from . import fast_gather as fast_gather_mod
 except ImportError as ex:
     fast_gather_mod = None
     print('Unable to load the fast gather module: %s' % ex, file=sys.stderr)
-
-PPMAC_HOST = os.environ.get('PPMAC_HOST', '10.0.0.98')
-PPMAC_PORT = int(os.environ.get('PPMAC_PORT', '22'))
-PPMAC_USER = os.environ.get('PPMAC_USER', 'root')
-PPMAC_PASS = os.environ.get('PPMAC_PASS', 'deltatau')
 
 
 class PPCommError(Exception):
@@ -120,7 +117,7 @@ class ShellChannel(object):
             self.send_line('/bin/bash --noediting')
 
         self.send_line('stty -echo')
-        self.send_line('export PS1="\u@\h:\w\$ "')
+        self.send_line(r'export PS1="\u@\h:\w\$ "')
         self.wait_for('%s@.*' % comm._user, verbose=True)
 
         if command is not None:
@@ -670,8 +667,8 @@ class PPComm(object):
     Power PMAC Communication via ssh/sftp
     """
 
-    def __init__(self, host=PPMAC_HOST, port=PPMAC_PORT,
-                 user=PPMAC_USER, password=PPMAC_PASS,
+    def __init__(self, host=config.hostname, port=config.port,
+                 user=config.username, password=config.password,
                  fast_gather=False, fast_gather_port=2332):
         self._host = host
         self._port = port
