@@ -24,39 +24,7 @@ import time
 import numpy as np
 
 from . import config
-
-
-def conv_uint24(b):
-    return struct.unpack('>I', ''.join(('\x00', b[0], b[1], b[2])))[0]
-
-
-def conv_int24(b):
-    sign_bit = ord(b[1]) & 0x80
-    if sign_bit:
-        sign_extension = '\xFF'
-    else:
-        sign_extension = '\x00'
-
-    return struct.unpack('>i', ''.join((sign_extension, b[1], b[2], b[3])))[0]
-
-
-UINT32, INT32, UINT24, INT24, FLOAT, DOUBLE, UBITS, SBITS = range(8)
-
-GATHER_TYPES = {
-    # type index : (size, format char, conversion function)
-    UINT32: (4, 'I', None),
-    INT32: (4, 'i', None),
-    UINT24: (4, 'I', None),
-    INT24: (4, '4B', conv_int24),
-    FLOAT: (4, 'f', None),
-    DOUBLE: (8, 'd', None),
-    UBITS: (4, 'I', None),
-    SBITS: (4, 'I', None),
-}
-
-# TODO: uint24/int24 are untested -- assuming they are still stored in 4 bytes
-# TODO: ubits/sbits -- not even sure what they are (unsigned/signed bits?) or
-#       their size
+from .gather_types import GATHER_TYPES
 
 
 class TCPSocket(object):
@@ -79,7 +47,7 @@ class TCPSocket(object):
             if sent == 0:
                 raise RuntimeError("Connection lost")
 
-            total = total + sent
+            total += sent
 
     def recv_fixed(self, expected):
         """
@@ -158,7 +126,6 @@ class GatherClient(TCPSocket):
         Returns: sample count (lines), and raw data
         """
         self.send(b'data\n')
-
         buf = self._recv_packet(b'D')
 
         samples, = struct.unpack('>I', buf[:4])
@@ -211,10 +178,13 @@ class GatherClient(TCPSocket):
             return GATHER_TYPES[type_]
 
         def make_conv_bits(start, count):
-            def wrapped(value):
-                value = (value >> start)
-                return (value & ((1 << count) - 1))
+            mask = ((1 << count) - 1)
 
+            def wrapped(values):
+                return [((value >> start) & mask)
+                        for value in values]
+
+            wrapped.__name__ = 'conv_bits_%d_to_%d' % (start, start + count)
             return wrapped
 
         # Undocumented types -- a certain number of bits and such
@@ -223,6 +193,7 @@ class GatherClient(TCPSocket):
         start = (type_ & self.START_MASK) >> 11
         count = (type_ & self.BIT_MASK)
         count = 32 - (count >> 6)
+
         ret = (4, 'I', make_conv_bits(start, count))
         GATHER_TYPES[type_] = ret
         return ret
@@ -249,15 +220,18 @@ class GatherClient(TCPSocket):
         if not isinstance(raw_data, memoryview):
             raw_data = memoryview(raw_data)
 
-        data = list(struct_.unpack(raw_data[:line_size * line_count]))
+        data = struct_.unpack(raw_data[:line_size * line_count])
 
+        ret_data = []
         for i, (size, format_, conv) in enumerate(types):
+            col = data[i::n_items]
             if conv is not None:
-                col_slice = slice(i, None, n_items)  # i::n_items
-                col = data[col_slice]
-                data[col_slice] = [conv(value) for value in col]
+                ret_data.append(conv(col))
+            else:
+                ret_data.append(col)
 
-        return data, n_items, line_count
+        # import pdb; pdb.set_trace()
+        return ret_data, n_items, line_count
 
     def _query_all(self):
         """
@@ -283,12 +257,12 @@ class GatherClient(TCPSocket):
                   ...]
 
         """
-        if as_numpy and np:
-            return self.get_rows(as_numpy=as_numpy).T
-        else:
-            data, n_items, samples = self._query_all()
+        data, n_items, samples = self._query_all()
 
-            return [data[i::n_items] for i in range(n_items)]
+        if as_numpy:
+            return np.asarray(data).reshape(n_items, samples)
+        else:
+            return data
 
     def get_rows(self, as_numpy=False):
         """
@@ -298,18 +272,12 @@ class GatherClient(TCPSocket):
                   [addr0[1], addr1[1], ...],
                   ...]
         """
-        data, n_items, samples = self._query_all()
-
         if as_numpy:
-            return np.asarray(data).reshape(samples, n_items)
+            return self.get_rows(as_numpy=as_numpy).T
         else:
-            ret = []
-            j = 0
-            for i in range(samples):
-                ret.append(data[j:j + n_items])
-                j += n_items
+            data, n_items, samples = self._query_all()
 
-            return ret
+            return list(zip(*data))
 
 
 def test(host=config.hostname, port=config.fast_gather_port):
@@ -321,10 +289,10 @@ def test(host=config.hostname, port=config.fast_gather_port):
     t0 = time.time()
     s.set_servo_mode()
     # s.set_phase_mode()
-    cols = s.get_columns()
+    cols = s.get_columns(as_numpy=False)
     t1 = time.time() - t0
 
-    print('elapsed %.2fms' % (t1 * 1000))
+    print('gather elapsed %.2fms' % (t1 * 1000))
 
     if cols:
         import numpy as np
@@ -338,6 +306,7 @@ def test(host=config.hostname, port=config.fast_gather_port):
             plt.plot(x_axis, col, label='Addr %d' % (i + 1))
         plt.legend(loc='best')
         plt.show()
+
 
 if __name__ == '__main__':
     import sys
