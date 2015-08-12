@@ -95,7 +95,7 @@ class TCPSocket(object):
             received += len(chunk)
             packet.append(chunk)
 
-        return ''.join(packet)
+        return b''.join(packet)
 
     def __getattr__(self, s):
         # can't subclass socket.socket, so here's the next best thing
@@ -127,14 +127,14 @@ class GatherClient(TCPSocket):
 
         packet_len, = struct.unpack('>I', packet_len)
         packet = self.recv_fixed(packet_len)
-        code, packet = packet[0], packet[1:]
+        code, packet = packet[:1], packet[1:]
 
-        if code == 'E':
+        if code == b'E':
             error_code, = struct.unpack('>I', packet[:4])
             raise GatherError('Error %d' % error_code)
 
         elif expected_code == code:
-            return packet
+            return memoryview(packet)
 
         else:
             raise RuntimeError('Unexpected code %s (expected %s)' % (code, expected_code))
@@ -143,9 +143,9 @@ class GatherClient(TCPSocket):
         """
         Get the integral types of the gathered data, one for each address
         """
-        self.send('types\n')
-        buf = self._recv_packet('T')
-        n_items = ord(buf[0])
+        self.send(b'types\n')
+        buf = self._recv_packet(b'T')
+        n_items, = struct.unpack('B', buf[:1])
         types = struct.unpack('>' + 'H' * n_items, buf[1:])
 
         assert(n_items == len(types))
@@ -157,9 +157,9 @@ class GatherClient(TCPSocket):
 
         Returns: sample count (lines), and raw data
         """
-        self.send('data\n')
+        self.send(b'data\n')
 
-        buf = self._recv_packet('D')
+        buf = self._recv_packet(b'D')
 
         samples, = struct.unpack('>I', buf[:4])
         return samples, buf[4:]
@@ -168,15 +168,15 @@ class GatherClient(TCPSocket):
         """
         Instruct the server to return gathered phase data
         """
-        self.send('phase\n')
-        self._recv_packet('K')
+        self.send(b'phase\n')
+        self._recv_packet(b'K')
 
     def set_servo_mode(self):
         """
         Instruct the server to return gathered servo data
         """
-        self.send('servo\n')
-        self._recv_packet('K')
+        self.send(b'servo\n')
+        self._recv_packet(b'K')
 
     def query_types_and_raw_data(self):
         """
@@ -186,16 +186,16 @@ class GatherClient(TCPSocket):
         requesting the type information separately from the raw data can be significantly
         slower. This method is more efficient, requesting both at the same time.
         """
-        self.send('all\n')
-        type_buf = self._recv_packet('T')
-        n_items = ord(type_buf[0])
+        self.send(b'all\n')
+        type_buf = self._recv_packet(b'T')
+        n_items, = struct.unpack('B', type_buf[:1])
         types = struct.unpack('>' + 'H' * n_items, type_buf[1:])
 
         if n_items == 0:
             return types, 0, []
         else:
             assert(n_items == len(types))
-            data_buf = self._recv_packet('D')
+            data_buf = self._recv_packet(b'D')
             samples, = struct.unpack('>I', data_buf[:4])
             return types, samples, data_buf[4:]
 
@@ -246,12 +246,15 @@ class GatherClient(TCPSocket):
         data_format = ''.join(format_ for (size, format_, conv) in types)
         struct_ = struct.Struct('>' + data_format * line_count)
 
-        data = list(struct_.unpack(raw_data[:(line_size * line_count)]))
+        if not isinstance(raw_data, memoryview):
+            raw_data = memoryview(raw_data)
+
+        data = list(struct_.unpack(raw_data[:line_size * line_count]))
 
         for i, (size, format_, conv) in enumerate(types):
-            col_slice = slice(i, None, n_items)  # i::n_items
-            col = data[col_slice]
             if conv is not None:
+                col_slice = slice(i, None, n_items)  # i::n_items
+                col = data[col_slice]
                 data[col_slice] = [conv(value) for value in col]
 
         return data, n_items, line_count
