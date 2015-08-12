@@ -5,7 +5,8 @@
 
 .. module:: ppmac.pp_comm
    :synopsis: Power PMAC communication through SSH by way of Paramiko.
-              Simplifies working with gpascii (the Power PMAC interpreter) remotely.
+              Simplifies working with gpascii (the Power PMAC interpreter)
+              remotely.
               Additionally does simple file operations through SFTP.
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 """
@@ -493,16 +494,20 @@ class GpasciiChannel(ShellChannel):
                     try:
                         self.send_line(assign_line, sync=True)
                     except GPError as ex:
-                        raise GPError('Failed to set coord[%d] motor %d: %s' % (coord, motor, ex))
+                        raise GPError('Failed to set coord[%d] motor %d: %s' %
+                                      (coord, motor, ex))
 
             if check:
                 current = self.get_coords()
                 for coord, motors in coords.items():
-                    motors = [(num, axis.lower()) for num, axis in motors.items()]
-                    motors_current = [(num, axis.lower()) for num, axis in current[coord].items()]
+                    motors = [(num, axis.lower()) for num, axis in
+                              motors.items()]
+                    motors_current = [(num, axis.lower()) for num, axis in
+                                      current[coord].items()]
                     if set(motors) != set(motors_current):
                         vlog(verbose, motors, motors_current)
-                        raise ValueError('Motors in coord system %d differ' % (coord, ))
+                        raise ValueError('Motors in coord system %d differ' %
+                                         (coord, ))
 
         vlog(verbose, 'Done')
 
@@ -559,7 +564,7 @@ class GpasciiChannel(ShellChannel):
                        for var in variables]
 
         for var, value in zip(variables, last_values):
-            print('%s = %s' % (var, value))
+            vlog(verbose, '%s = %s' % (var, value))
 
         try:
             active = [True, True, True]
@@ -643,7 +648,8 @@ class GpasciiChannel(ShellChannel):
         return values
 
     def get_servo_control(self, motor):
-        return (1 == self.get_variable('Motor[%d].ServoCtrl' % motor, type_=int))
+        return (1 == self.get_variable('Motor[%d].ServoCtrl' % motor,
+                                       type_=int))
 
     def set_servo_control(self, motor, enabled):
         if enabled:
@@ -764,7 +770,8 @@ class PPComm(object):
         If wait_match is set to a regular expression, each line
         will be compared against it.
         """
-        stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+        stdin, stdout, stderr = self._client.exec_command(command,
+                                                          timeout=timeout)
 
         if wait_match is not None:
             for line, m in _wait_for(stdout.readlines(), wait_match, **kwargs):
@@ -898,7 +905,8 @@ def main():
 if __name__ == '__main__':
     logger.setLevel(logging.DEBUG)
 
-    logging.basicConfig(format='%(asctime)s %(name)-12s %(levelname)-8s %(message)s',
+    logging.basicConfig(format=('%(asctime)s %(name)-12s '
+                                '%(levelname)-8s %(message)s'),
                         datefmt='%m-%d %H:%M',
                         )
     comm = main()
