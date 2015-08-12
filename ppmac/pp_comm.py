@@ -115,18 +115,20 @@ class ShellChannel(object):
     An interactive SSH shell channel
     """
 
-    def __init__(self, comm, command=None, single=False, disable_readline=False):
+    def __init__(self, comm, command=None, single=False,
+                 disable_readline=False, verbose=False):
         self.lock = threading.RLock()
         self._comm = comm
         self._client = comm._client
         self._channel = comm._client.invoke_shell()
+        self._verbose = verbose
 
         if disable_readline:
             self.send_line('/bin/bash --noediting')
 
         self.send_line('stty -echo')
         self.send_line(r'export PS1="\u@\h:\w\$ "')
-        self.wait_for('%s@.*' % comm._user, verbose=True)
+        self.wait_for('%s@.*' % comm._user, verbose=verbose)
 
         if command is not None:
             self.send_line(command)
@@ -143,8 +145,8 @@ class ShellChannel(object):
         with self.lock:
             gen = self.read_timeout(timeout, **kwargs)
             ret = []
-            for line, groups in _wait_for(gen, wait_pattern,
-                                          verbose=verbose, remove_matching=remove_matching):
+            for line, groups in _wait_for(gen, wait_pattern, verbose=verbose,
+                                          remove_matching=remove_matching):
                 ret.append(line)
                 if groups is not None:
                     return ret, groups
@@ -228,7 +230,7 @@ class ShellChannel(object):
             raise PPCommChannelClosed()
 
         with self.lock:
-            logger.debug('-> %s' % line)
+            vlog(self._verbose, '-> %s' % line)
             channel.send('%s%s' % (line, delim))
 
         if sync:
@@ -244,11 +246,12 @@ class GpasciiChannel(ShellChannel):
     CMD_GPASCII = 'gpascii -2 2>&1'
     EOT = '\04'
 
-    def __init__(self, comm, command=None):
+    def __init__(self, comm, command=None, verbose=False):
         if command is None:
             command = self.CMD_GPASCII
 
-        ShellChannel.__init__(self, comm, command=command)
+        ShellChannel.__init__(self, comm, command=command,
+                              verbose=verbose)
 
         if not self.wait_for('.*(STDIN Open for ASCII Input)$'):
             raise ValueError('GPASCII startup string not found')
@@ -695,12 +698,12 @@ class PPComm(object):
                       password=self._pass, fast_gather=self._fast_gather,
                       fast_gather_port=self._fast_gather_port)
 
-    def gpascii_channel(self, cmd=None):
+    def gpascii_channel(self, cmd=None, verbose=False):
         """
         Create a new gpascii channel -- an independent
         gpascii process running on the remote machine
         """
-        return GpasciiChannel(self, command=cmd)
+        return GpasciiChannel(self, command=cmd, verbose=verbose)
 
     def gpascii_file(self, filename, check_errors=True, **kwargs):
         """

@@ -16,13 +16,17 @@ import sys
 import ast
 import struct
 import functools
+import logging
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 from . import pp_comm
+from .pp_comm import vlog
 from .util import InsList
 
+
+logger = logging.getLogger(__name__)
 
 max_samples = 0x7FFFFFFF
 gather_config_file = '/var/ftp/gather/GatherSetting.txt'
@@ -124,12 +128,14 @@ def parse_gather(addresses, lines, delim=' '):
             if line.count(delim) == (count - 1)]
 
     if len(data) == 0 and len(lines) > 2:
-        raise RuntimeError('Gather results inconsistent with settings file (wrong file or addresses incorrect?)')
+        raise RuntimeError('Gather results inconsistent with settings file'
+                           '(wrong file or addresses incorrect?)')
 
     return data
 
 
-def setup_gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
+def setup_gather(gpascii, addresses, duration=0.1, period=1,
+                 output_file=gather_output_file):
     comm = gpascii._comm
 
     servo_period = gpascii.servo_period
@@ -143,7 +149,7 @@ def setup_gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_
 
     comm.write_file(gather_config_file, settings)
 
-    print('Wrote configuration to: %s' % gather_config_file)
+    logger.debug('Wrote configuration to: %s', gather_config_file)
 
     comm.gpascii_file(gather_config_file)
 
@@ -153,39 +159,42 @@ def setup_gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_
         duration = get_duration(servo_period, period, total_samples)
         gpascii.set_variable('gather.maxsamples', total_samples)
 
-        print('* Warning: Buffer not large enough.')
-        print('  Maximum count with the current addresses: %d' % (max_lines, ))
-        print('  New duration is: %.2f s' % (duration, ))
+        logger.warning('* Warning: Buffer not large enough.')
+        logger.warning('  Maximum count with the current addresses: %d',
+                       max_lines)
+        logger.warning('  New duration is: %.2f s', duration)
 
     return total_samples
 
 
-def gather(gpascii, addresses, duration=0.1, period=1, output_file=gather_output_file):
-    comm = gpascii._comm
+def gather(gpascii, addresses, duration=0.1, period=1,
+           output_file=gather_output_file, verbose=True, f=sys.stdout):
 
-    total_samples = setup_gather(gpascii, addresses, duration=duration, period=period,
-                                 output_file=output_file)
+    total_samples = setup_gather(gpascii, addresses, duration=duration,
+                                 period=period, output_file=output_file)
 
     gpascii.set_variable('gather.enable', 2)
     samples = 0
 
-    print('Waiting for %d samples' % total_samples)
+    logger.info('Waiting for %d samples', total_samples)
     try:
         while samples < total_samples:
             samples = gpascii.get_variable('gather.samples', type_=int)
-            if total_samples != 0:
+            if total_samples != 0 and verbose:
                 percent = 100. * (float(samples) / total_samples)
                 print('%-6d/%-6d (%.2f%%)' % (samples, total_samples,
                                               percent),
-                      end='\r')
-                sys.stdout.flush()
+                      end='\r', file=f)
+                f.flush()
             time.sleep(0.1)
     except KeyboardInterrupt:
         pass
     finally:
-        print()
+        print(file=f)
 
     gpascii.set_variable('gather.enable', 0)
+
+    comm = gpascii._comm
     return get_gather_results(comm, addresses, output_file)
 
 
@@ -283,7 +292,7 @@ def _check_times(gpascii, addresses, rows):
         gather_period = gpascii.get_variable('gather.period', type_=int)
         if 0 in times:
             # TODO bugfix?
-            print('Gather data issue, trimming data...')
+            logger.warning('Gather data issue, trimming data...')
             last_time = times.index(0)
 
             times = np.arange(0, len(rows) * gather_period, gather_period)
@@ -344,20 +353,22 @@ def plot(addr, data):
             plt.plot(x_axis, data[:, i], label=addr[i])
             plt.legend()
 
-    print('Plotting...')
+    logger.debug('Plotting')
     plt.show()
 
 
 def gather_and_plot(gpascii, addr, duration=0.2, period=1):
     servo_period = gpascii.servo_period
-    print('Servo period is %g (%g KHz)' % (servo_period, 1.0 / (servo_period * 1000)))
+    logger.debug('Servo period is %g (%g KHz)', servo_period,
+                 1.0 / (servo_period * 1000))
 
     data = gather(gpascii, addr, duration=duration, period=period)
     gather_data_to_file('test.txt', addr, data)
     plot(addr, data)
 
 
-def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, reps=1, one_direction=False, kill=True):
+def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0,
+                     reps=1, one_direction=False, kill=True):
     """
     root@10.0.0.98:/opt/ppmac/tune# ./othertrajectory
     You need 9 Arguments for this function
@@ -372,11 +383,10 @@ def other_trajectory(move_type, motor, distance, velocity=1, accel=1, dwell=0, r
             Kill flag (0 or 1)
     Please try again.
     """
-    print('other trajectory', motor, move_type)
+    logger.info('other trajectory: %s %s', motor, move_type)
     assert(move_type in (OT_RAMP, OT_TRAPEZOID, OT_S_CURVE))
     velocity = abs(velocity)
 
-    print(locals().keys())
     args = ['%(move_type)d',
             '%(motor)d',
             '%(distance)f',
@@ -422,14 +432,14 @@ def plot_tune_results(columns, data,
 
 def run_tune_program(comm, cmd, result_path='/var/ftp/gather/othertrajectory_gather.txt',
                      timeout=50):
-    print('Running tune', cmd)
+    logger.info('Running tune: %s', cmd)
     for line, m in comm.shell_output(cmd, timeout=timeout,
                                      wait_match='^(.*)\s+finished Successfully!$'):
         if m is not None:
-            print('Finished: %s' % m.groups()[0])
+            logger.info('Finished: %s', m.groups()[0])
             break
         else:
-            print(line)
+            logger.debug(line)
 
     columns = ['Sys.ServoCount.a',
                'Desired',
@@ -467,18 +477,21 @@ trapezoid = _other_traj(OT_TRAPEZOID)
 s_curve = _other_traj(OT_S_CURVE)
 
 
-def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac, r_mask=0x1e, g_mask=0xffffffff):
+def geterrors_motor(motor, time_=0.3, abort_cmd='', m_mask=0x7ac, c_mask=0x7ac,
+                    r_mask=0x1e, g_mask=0xffffffff):
     exe = '/opt/ppmac/geterrors/geterrors'
-    args = '-t %(time_).1f -#%(motor)d -m0x%(m_mask)x -c0x%(c_mask)x -r0x%(r_mask)x -g0x%(g_mask)x' % locals()
+    args = ('-t %(time_).1f -#%(motor)d -m0x%(m_mask)x -c0x%(c_mask)x '
+            '-r0x%(r_mask)x -g0x%(g_mask)x' % locals())
     if abort_cmd:
         args += ' -S"%(abort_cmd)s"'
 
-    print(exe, args)
+    logger.info('%s %s', exe, args)
 
 
 def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
                    gather_vars=[], period=1, samples=max_samples,
-                   cancel_callback=None, check_active=False):
+                   cancel_callback=None, check_active=False,
+                   verbose=True):
     """
     Run a motion program and read back the gathered data
     """
@@ -505,9 +518,9 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
 
     comm.write_file(gather_config_file, settings)
 
-    print('Wrote configuration to', gather_config_file)
+    logger.info('Wrote configuration to %s', gather_config_file)
 
-    comm.gpascii_file(gather_config_file, verbose=True)
+    comm.gpascii_file(gather_config_file, verbose=verbose)
 
     for line in script_text.split('\n'):
         gpascii.send_line(line.lstrip())
@@ -523,22 +536,20 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
         return gpascii.get_variable(active_var, type_=int)
 
     try:
-        #time.sleep(1.0 + abs((iterations * distance) / velocity))
-        print("Waiting...")
+        # time.sleep(1.0 + abs((iterations * distance) / velocity))
+        vlog(verbose, "Waiting...")
         while get_status() == 0:
             time.sleep(0.1)
 
         while get_status() != 0:
             samples = gpascii.get_variable('gather.samples', type_=int)
-            print("Working... got %6d data points" % samples, end='\r')
+            vlog(verbose, "Working... got %6d data points" % samples, end='\r')
             time.sleep(0.1)
 
-        print()
-        print('Done')
+        vlog(verbose, 'Done')
 
     except KeyboardInterrupt as ex:
-        print()
-        print('Cancelled - stopping program')
+        vlog(verbose, 'Cancelled - stopping program')
         gpascii.program(coord_sys, prog, stop=True)
         if cancel_callback is not None:
             cancel_callback(ex)
@@ -546,7 +557,9 @@ def run_and_gather(gpascii, script_text, prog=999, coord_sys=0,
     try:
         for line in gpascii.read_timeout(timeout=0.1):
             if 'error' in line:
-                print(line)
+                if verbose:
+                    print(line)
+                logger.error(line)
     except pp_comm.TimeoutError:
         pass
 
@@ -570,10 +583,13 @@ def check_servocapt_rollover(scapt, rollover=1e6):
 
 
 def main():
+    logging.basicConfig()
+    logger.setLevel(logging.DEBUG)
+
     addr = ['Sys.ServoCount.a',
             'Motor[3].Pos.a',
-            #'Motor[4].Pos.a',
-            #'Motor[5].Pos.a',
+            # 'Motor[4].Pos.a',
+            # 'Motor[5].Pos.a',
             ]
     duration = 10.0
     period = 1
@@ -582,11 +598,10 @@ def main():
 
     comm = PPComm()
     gpascii = comm.gpascii_channel()
-    servo_period = gpascii.servo_period
-    print('new servo period is', servo_period)
+    gpascii.servo_period
 
-    ramp_cmd = ramp(3, distance=0.01, velocity=0.02)
-    if 1:
+    if 0:
+        ramp_cmd = ramp(3, distance=0.01, velocity=0.02)
         run_tune_program(comm, ramp_cmd)
     else:
         gather_and_plot(comm.gpascii, addr, duration=duration, period=period)
