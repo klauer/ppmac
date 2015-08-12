@@ -691,8 +691,9 @@ class PPComm(object):
         self._sftp = None
 
     def __copy__(self):
-        return PPComm(host=self._host, port=self._port,
-                      user=self._user, password=self._pass)
+        return PPComm(host=self._host, port=self._port, user=self._user,
+                      password=self._pass, fast_gather=self._fast_gather,
+                      fast_gather_port=self._fast_gather_port)
 
     def gpascii_channel(self, cmd=None):
         """
