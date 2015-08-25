@@ -4,9 +4,10 @@
 
 .. module:: ppmac.hardware
    :synopsis: Get a hierarchical representation of the installed cards in the
-              Power PMAC. Note that not all devices are represented here, but
-              only those that are listed in the incomplete Power PMAC documentation.
-              Additionally, most device classes are just placeholders.
+              Power PMAC. Note that not all devices are represented here,
+              but only those that are listed in the incomplete Power PMAC
+              documentation.  Additionally, most device classes are just
+              placeholders.
 .. moduleauthor:: Ken Lauer <klauer@bnl.gov>
 
 """
@@ -61,7 +62,8 @@ def var_prop(read_var, write_var=None,
             check_cache(self)
             self._cache[read_var] = readback
 
-    return property(fget, fset, doc='Variable property %s/%s' % (read_var, write_var))
+    doc = 'Variable property %s/%s' % (read_var, write_var)
+    return property(fget, fset, doc=doc)
 
 
 class ChannelBase(object):
@@ -88,13 +90,15 @@ class ChannelBase(object):
         """
         Get the value of a variable from gpascii
         """
-        return self.gpascii.get_variable(self.get_variable_name(name), **kwargs)
+        return self.gpascii.get_variable(self.get_variable_name(name),
+                                         **kwargs)
 
     def set_variable(self, name, value, **kwargs):
         """
         Set the value of a variable with gpascii
         """
-        return self.gpascii.set_variable(self.get_variable_name(name), value, **kwargs)
+        return self.gpascii.set_variable(self.get_variable_name(name), value,
+                                         **kwargs)
 
     def __repr__(self):
         return '%s(base="%s")' % (self.__class__.__name__, self._base)
@@ -111,7 +115,8 @@ class GateBase(object):
         self.gpascii = gpascii
         self._index = index
         self._base = self.BASE % index
-        self.types = [const.part_types.get(i, '%d' % i) for i in _bit_indices(self._type)]
+        self.types = [const.part_types.get(i, '%d' % i)
+                      for i in _bit_indices(self._type)]
         self.channels = {}
 
         if self.N_CHANNELS > 0:
@@ -145,18 +150,19 @@ class GateBase(object):
         """
         Get the value of a variable from gpascii
         """
-        return self.gpascii.get_variable(self.get_variable_name(name), **kwargs)
+        return self.gpascii.get_variable(self.get_variable_name(name),
+                                         **kwargs)
 
     def set_variable(self, name, value, **kwargs):
         """
         Set the value of a variable with gpascii
         """
-        return self.gpascii.set_variable(self.get_variable_name(name), value, **kwargs)
+        return self.gpascii.set_variable(self.get_variable_name(name), value,
+                                         **kwargs)
 
     def __repr__(self):
-        return '%s(index=%d, num=%d, rev=%d, types=%s)' % (self.__class__.__name__,
-                                                           self._index, self.num, self.rev,
-                                                           self.types)
+        return ('{0}(index={1._index:d}, num={1.num:d}, rev={1.rev:d}, '
+                'types={1.types})'.format(self.__class__.__name__, self))
 
     @property
     def phase_master(self):
@@ -164,9 +170,9 @@ class GateBase(object):
         The source of the phase clock for the entire system
 
         Quoting the help file:
-            In any Power PMAC system, there must be one and only one source of servo and
-            phase clock signals for the system - either one of the Servo ICs or MACRO ICs,
-            or a source external to the system.
+            In any Power PMAC system, there must be one and only one source of
+            servo and phase clock signals for the system - either one of the
+            Servo ICs or MACRO ICs, or a source external to the system.
         """
         return (self.phase_servo_dir & 1) == 1
 
@@ -177,10 +183,12 @@ class GateBase(object):
         """
         return (self.phase_servo_dir & 2) == 2
 
-    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div,
+                           **kwargs):
         pass
 
-    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div,
+                      **kwargs):
         pass
 
 
@@ -203,9 +211,11 @@ class Gate12Base(GateBase):
         return 2.0 * self.pwm_frequency
 
     def _get_pwm_period(self, phase_freq, phase_clock_div):
-        return int(const.PWM_FREQ_HZ / (2 * (phase_clock_div + 1) * phase_freq)) - 1
+        return int(const.PWM_FREQ_HZ / (2 * (phase_clock_div + 1) *
+                   phase_freq)) - 1
 
-    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+    def get_clock_settings(self, phase_freq, phase_clock_div, servo_clock_div,
+                           **kwargs):
         pwm_period = self._get_pwm_period(phase_freq, phase_clock_div)
 
         return [(self.get_variable_name('PwmPeriod'), pwm_period),
@@ -213,7 +223,8 @@ class Gate12Base(GateBase):
                 (self.get_variable_name('ServoClockDiv'), servo_clock_div),
                 ]
 
-    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div, **kwargs):
+    def _update_clock(self, phase_freq, phase_clock_div, servo_clock_div,
+                      **kwargs):
         self.pwm_period = self._get_pwm_period(phase_freq, phase_clock_div)
         self.phase_clock_div = phase_clock_div
         self.servo_clock_div = servo_clock_div
@@ -257,7 +268,8 @@ class Gate3(GateBase):
 
     def __init__(self, gpascii, index):
         GateBase.__init__(self, gpascii, index)
-        self.options = [gpascii.get_variable('%s.PartOpt%d' % (self._base, n), type_=int)
+        self.options = [gpascii.get_variable('%s.PartOpt%d' % (self._base, n),
+                                             type_=int)
                         for n in range(self.N_OPT)]
 
     @property
@@ -291,11 +303,13 @@ class Gate3(GateBase):
         return self.options[4]
 
     def __repr__(self):
-        return '%s(index=%d, num=%d, rev=%d, types=%s)' % (self.__class__.__name__, self._index,
-                                                           self.num, self.rev, self.types)
+        return ('{0}(index={1._index:d}, num={1.num:d}, rev={1.rev:d}, '
+                'types={1.types})'.format(self.__class__.__name__, self))
 
-    def get_clock_settings(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
-                           pwm_freq_mult=None, phase_clock_mult=0, **kwargs):
+    def get_clock_settings(self, phase_freq, phase_clock_div=0,
+                           servo_clock_div=0, pwm_freq_mult=None,
+                           phase_clock_mult=0,
+                           **kwargs):
         ret = []
 
         # Phase clock divider is ignored if this is the phase clock master
@@ -310,13 +324,15 @@ class Gate3(GateBase):
 
         if pwm_freq_mult is not None:
             for i, chan in self.channels.items():
-                ret.append((chan.get_variable_name('PwmFreqMult'), pwm_freq_mult))
+                ret.append((chan.get_variable_name('PwmFreqMult'),
+                            pwm_freq_mult))
 
         return ret
 
     def _update_clock(self, phase_freq, phase_clock_div=0, servo_clock_div=0,
                       pwm_freq_mult=None, **kwargs):
-        for line in self.get_clock_settings(phase_freq, phase_clock_div=phase_clock_div,
+        for line in self.get_clock_settings(phase_freq,
+                                            phase_clock_div=phase_clock_div,
                                             servo_clock_div=servo_clock_div,
                                             pwm_freq_mult=None, **kwargs):
             self.gpascii.send_line(line)
@@ -466,7 +482,8 @@ def test():
     comm = PPComm()
     for device in enumerate_hardware(comm.gpascii):
         if device.phase_master or device.servo_master:
-            print('%s <-- Master (phase: %d servo: %d)' % (device, device.phase_master, device.servo_master))
+            print('%s <-- Master (phase: %d servo: %d'
+                  ')' % (device, device.phase_master, device.servo_master))
         else:
             print(device)
         for i, chan in device.channels.items():
