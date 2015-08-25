@@ -145,7 +145,8 @@ def test():
 
     for device in devices:
         if hasattr(device, 'phase_frequency'):
-            print(device, 'phase frequency', device.phase_frequency, device.servo_clock_div)
+            print(device, 'phase frequency', device.phase_frequency,
+                  device.servo_clock_div)
 
         for i, chan in device.channels.items():
             print('\t', chan, 'pwm freq', chan.pwm_frequency)
@@ -153,7 +154,8 @@ def test():
     phase_master, servo_master = get_clock_master(devices)
     print('master is', phase_master, servo_master)
     print('current servo period is', gpascii.get_variable('Sys.ServoPeriod'))
-    print('current phase over servo period is', gpascii.get_variable('Sys.PhaseOverServoPeriod'))
+    print('current phase over servo period is',
+          gpascii.get_variable('Sys.PhaseOverServoPeriod'))
 
     if 1:
         set_global_phase(devices, 10000, 1)

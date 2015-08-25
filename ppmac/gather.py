@@ -283,15 +283,21 @@ def get_addr_index(addresses, addr):
 
 
 def _check_times(gpascii, addresses, rows):
+    if rows is None or len(rows) == 0:
+        return rows
+
     if 'Sys.ServoCount.a' in addresses:
         idx = get_addr_index(addresses, 'Sys.ServoCount.a')
         servo_period = gpascii.servo_period
 
         times = [row[idx] for row in rows]
+        if isinstance(rows[0], tuple):
+            # TODO fast gather returns list of tuples
+            rows = [list(row) for row in rows]
 
         gather_period = gpascii.get_variable('gather.period', type_=int)
         if 0 in times:
-            # TODO bugfix?
+            # This happens when the gather buffer rolls over, iirc
             logger.warning('Gather data issue, trimming data...')
             last_time = times.index(0)
 
