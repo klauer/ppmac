@@ -51,6 +51,10 @@ class GPError(PPCommError):
     pass
 
 
+class ScriptFailed(GPError):
+    pass
+
+
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
                   re.compile('^\/\/ \*\*\* EOF'),
@@ -381,24 +385,28 @@ class GpasciiChannel(ShellChannel):
                 if 'error' in line:
                     raise GPError(line)
 
-                if '#' in line:
-                    # <- &2#1->x
-                    # ('&2', '2', '1', 'x')
-                    # <- #3->0
-                    # (None, None, '3', '0')
+                if '#' not in line:
+                    continue
 
-                    m = re.search('(&(\d+))?#(\d+)->([a-zA-Z0-9]+)', line)
-                    if m:
-                        groups = m.groups()
-                        _, coord, mnum, assigned = groups
-                        if assigned == '0':
-                            assigned = None
-                        if int(mnum) == motor:
-                            if coord is None:
-                                coord = 0
-                            else:
-                                coord = int(coord)
-                            return coord, assigned
+                # <- &2#1->x
+                # ('&2', '2', '1', 'x')
+                # <- #3->0
+                # (None, None, '3', '0')
+
+                m = re.search('(&(\d+))?#(\d+)->([a-zA-Z0-9]+)', line)
+                if not m:
+                    continue
+
+                groups = m.groups()
+                _, coord, mnum, assigned = groups
+                if assigned == '0':
+                    assigned = None
+                if int(mnum) == motor:
+                    if coord is None:
+                        coord = 0
+                    else:
+                        coord = int(coord)
+                    return coord, assigned
 
         return None, None
 
@@ -602,10 +610,84 @@ class GpasciiChannel(ShellChannel):
         error_status = 'Coord[%d].ErrorStatus' % coord_sys
         errno = self.get_variable(error_status, type_=int)
 
-        if errno in const.coord_errors and verbose:
-            logger.error('Error: %s', const.coord_errors[errno])
+        if errno in const.coord_errors:
+            error_desc = '({}) {}'.format(errno, const.coord_errors[errno])
+            logger.error('Error %s', error_desc)
+            raise ScriptFailed(error_desc)
 
         return errno
+
+    def send_program(self, coord, prog_num, motors={},
+                     macros={}, filename=None, script=None, run=False,
+                     verbose=False,
+                     **kwargs):
+        """
+        Send a program and (optionally) run it in a coordinate system.
+        """
+        self.send_line('&%dabort' % (coord, ))
+
+        opening_lines = ['close all buffers',
+                         'open prog %d' % prog_num]
+        closing_lines = ['close']
+
+        if filename is not None:
+            logger.debug('Sending script: %s' % filename)
+            script = open(filename, 'rt').readlines()
+        elif script is None:
+            raise ValueError('Must specify script text or filename')
+
+        if isinstance(script, (list, tuple)):
+            script = list(script)
+        else:
+            script = [script]
+
+        script = opening_lines + script + closing_lines
+
+        if macros:
+            script = '\n'.join(script)
+            script = script.format(**macros)
+            script = script.split('\n')
+
+        for line in script:
+            if line.rstrip():
+                logger.debug('Script line: %s', line.rstrip())
+            try:
+                self.send_line(line.strip())
+            except GPError as ex:
+                logger.error('Failed to send script: %s', ex)
+                raise
+
+        self.sync()
+
+        if motors:
+            self.set_coords({coord: motors},
+                            verbose=verbose,
+                            undefine_coord=True)
+
+        if run:
+            try:
+                self.run_and_wait(coord, prog_num, **kwargs)
+            except GPError as ex:
+                logger.error('Script run error: %s', ex)
+                if 'READY TO RUN' in str(ex):
+                    logger.info('Are all motors in the coordinate system in closed'
+                                ' loop?')
+                raise
+
+        return script
+
+    def run_simple_script(self, fn, macros=None):
+        if macros is None:
+            macros = {}
+
+        for line in open(fn, 'rt').readlines():
+            line = line.strip().format(**macros)
+            if line.startswith('//') or not line:
+                continue
+
+            self.send_line(line)
+
+        self.sync()
 
     def monitor_variables(self, variables, f=sys.stdout,
                           change_callback=None, show_change_set=False,
