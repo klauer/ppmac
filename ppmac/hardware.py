@@ -433,32 +433,32 @@ def get_addr_error_indices(gpascii, gate=3):
             yield index
 
 
+def _get_gates(gpascii, gate_ver, default_class):
+    for index in get_autodetect_indices(gpascii, gate_ver):
+        base = 'Gate%s[%d]' % (gate_ver, index)
+        part_num = gpascii.get_variable('%s.PartNum' % base, type_=int)
+        if part_num == 0:
+            continue
+
+        part_str = const.parts.get(part_num, '')
+        if part_str in globals():
+            class_ = globals()[part_str]
+        else:
+            class_ = default_class
+
+        yield class_(gpascii, index)
+
+
 def enumerate_hardware(gpascii):
     """
     Returns a list of Gate* instances for all detected hardware
     """
-    ret = []
 
-    def get_gates(gate_ver, default_class):
-        for index in get_autodetect_indices(gpascii, gate_ver):
-            base = 'Gate%s[%d]' % (gate_ver, index)
-            part_num = gpascii.get_variable('%s.PartNum' % base, type_=int)
-            if part_num == 0:
-                continue
-
-            part_str = const.parts.get(part_num, '')
-            if part_str in globals():
-                class_ = globals()[part_str]
-            else:
-                class_ = default_class
-
-            ret.append(class_(gpascii, index))
-
-    get_gates(1, Gate1)
-    get_gates(2, Gate2)
-    get_gates(3, Gate3)
-    get_gates('IO', GateIO)
-    return ret
+    gates = [(1, Gate1), (2, Gate2), (3, Gate3), ('IO', GateIO)]
+    return [inst
+            for gate_ver, default_class in gates
+            for inst in _get_gates(gpascii, gate_ver, default_class)
+            ]
 
 
 def enumerate_address_errors(gpascii):
