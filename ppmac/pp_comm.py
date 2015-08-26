@@ -632,7 +632,8 @@ class GpasciiChannel(ShellChannel):
 
         if filename is not None:
             logger.debug('Sending script: %s' % filename)
-            script = open(filename, 'rt').readlines()
+            with open(filename, 'rt') as f:
+                script = f.readlines()
         elif script is None:
             raise ValueError('Must specify script text or filename')
 
@@ -680,12 +681,13 @@ class GpasciiChannel(ShellChannel):
         if macros is None:
             macros = {}
 
-        for line in open(fn, 'rt').readlines():
-            line = line.strip().format(**macros)
-            if line.startswith('//') or not line:
-                continue
+        with open(fn, 'rt') as f:
+            for line in f.readlines():
+                line = line.strip().format(**macros)
+                if line.startswith('//') or not line:
+                    continue
 
-            self.send_line(line)
+                self.send_line(line)
 
         self.sync()
 

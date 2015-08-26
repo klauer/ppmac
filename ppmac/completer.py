@@ -350,7 +350,8 @@ def start_completer_from_sql_script(script, db_file, gpascii=None):
 
 
 def start_completer_from_sql_file(sql_file='ppmac.sql', db_file=':memory:'):
-    sql = open(sql_file, 'rt').read()
+    with open(sql_file, 'rt') as f:
+        sql = f.read()
     return start_completer_from_sql_script(sql, db_file)
 
 
