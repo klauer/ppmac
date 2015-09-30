@@ -37,6 +37,15 @@ class TCPSocket(object):
         if host_port is not None:
             self.connect(host_port)
 
+    def __del__(self):
+        if self.sock is not None:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+
+            self.sock = None
+
     def send(self, packet):
         """
         Send the full packet, ensuring delivery
