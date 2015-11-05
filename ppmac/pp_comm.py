@@ -223,7 +223,7 @@ class ShellChannel(object):
                     line = channel.recv_stderr(1024)
                     vlog(verbose, '<stderr- %s' % line)
 
-            if timeout > 0:
+            if not check_timeout():
                 raise TimeoutError('Elapsed %.2f s' % (time.time() - t0))
 
     def send_line(self, line, delim='\n', sync=False):
@@ -283,7 +283,7 @@ class GpasciiChannel(ShellChannel):
         if check:
             return self.get_variable(var)
 
-    def get_variable(self, var, type_=str, timeout=1.0):
+    def get_variable(self, var, type_=str, timeout=2.0):
         """
         Get a Power PMAC variable, and typecast it to type_
 
@@ -543,7 +543,8 @@ class GpasciiChannel(ShellChannel):
         self.send_line(command, sync=True)
 
     def run_and_wait(self, coord_sys, program, variables=[],
-                     active_var=None, verbose=True, change_callback=None):
+                     active_var=None, verbose=True, change_callback=None,
+                     read_timeout=5.0):
         """
         Run a motion program in a coordinate system.
 
@@ -566,9 +567,14 @@ class GpasciiChannel(ShellChannel):
         active_var = 'Coord[%d].ProgActive' % coord_sys
 
         def get_active():
-            return self.get_variable(active_var, type_=int)
+            try:
+                return self.get_variable(active_var, type_=int,
+                                         timeout=read_timeout)
+            except TimeoutError as ex:
+                vlog(verbose, 'Read active timed out (%s: %s)' % (active_var, ex))
+                return True
 
-        last_values = [self.get_variable(var)
+        last_values = [self.get_variable(var, timeout=read_timeout)
                        for var in variables]
 
         for var, value in zip(variables, last_values):
@@ -581,10 +587,15 @@ class GpasciiChannel(ShellChannel):
                 active.append(get_active())
 
                 if variables is None or not variables:
-                    time.sleep(0.05)
+                    time.sleep(0.1)
                 else:
-                    values = [self.get_variable(var)
-                              for var in variables]
+                    try:
+                        values = [self.get_variable(var, timeout=read_timeout)
+                                  for var in variables]
+                    except TimeoutError as ex:
+                        print('Get variables timed out (%s: %s)' % (variables, ex))
+                        continue
+
                     for var, old_value, new_value in zip(variables,
                                                          last_values, values):
                         if old_value != new_value:
