@@ -55,6 +55,10 @@ class ScriptFailed(GPError):
     pass
 
 
+class ScriptCancelled(ScriptFailed):
+    pass
+
+
 PPMAC_MESSAGES = [re.compile('.*\/\/ \*\*\* exit'),
                   re.compile('^UnlinkGatherThread:.*'),
                   re.compile('^\/\/ \*\*\* EOF'),
@@ -544,7 +548,8 @@ class GpasciiChannel(ShellChannel):
 
     def run_and_wait(self, coord_sys, program, variables=[],
                      active_var=None, verbose=True, change_callback=None,
-                     read_timeout=5.0):
+                     read_timeout=5.0, cancel_signal=None,
+                     stop_on_cancel=True):
         """
         Run a motion program in a coordinate system.
 
@@ -571,7 +576,8 @@ class GpasciiChannel(ShellChannel):
                 return self.get_variable(active_var, type_=int,
                                          timeout=read_timeout)
             except TimeoutError as ex:
-                vlog(verbose, 'Read active timed out (%s: %s)' % (active_var, ex))
+                vlog(verbose, 'Read active timed out (%s: %s)' %
+                     (active_var, ex))
                 return True
 
         last_values = [self.get_variable(var, timeout=read_timeout)
@@ -593,7 +599,8 @@ class GpasciiChannel(ShellChannel):
                         values = [self.get_variable(var, timeout=read_timeout)
                                   for var in variables]
                     except TimeoutError as ex:
-                        print('Get variables timed out (%s: %s)' % (variables, ex))
+                        print('Get variables timed out (%s: %s)' %
+                              (variables, ex))
                         continue
 
                     for var, old_value, new_value in zip(variables,
@@ -609,6 +616,11 @@ class GpasciiChannel(ShellChannel):
 
                     last_values = values
 
+                    if cancel_signal is not None and cancel_signal.is_set():
+                        if stop_on_cancel:
+                            self.program(coord_sys, program, stop=True)
+                            raise ScriptCancelled('aborted')
+                        raise ScriptCancelled('continuing to run in background')
         except KeyboardInterrupt:
             if get_active():
                 vlog(verbose, "Aborting...")
