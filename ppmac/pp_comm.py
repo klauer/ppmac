@@ -771,14 +771,22 @@ class GpasciiChannel(ShellChannel):
         with self.lock:
             self.send_line('#%djog/' % motor, sync=True)
 
-    def jog(self, motor, position, relative=False):
-        with self.lock:
-            if relative:
-                cmd = '^'
-            else:
-                cmd = '='
+    def jog(self, motor, position, relative=False, wait=True, timeout=2.0):
+        if relative:
+            cmd = '^'
+        else:
+            cmd = '='
 
-            self.send_line('#%djog%s%.8f' % (motor, cmd, position), sync=True)
+        with self.lock:
+            self.send_line('#%djog%s%f' % (motor, cmd, position), sync=True)
+
+        if wait:
+            t0 = time.time()
+            while self.get_variable('Motor[%d].InPos' % motor) == 0:
+                time.sleep(0.1)
+
+                if (time.time() - t0) > timeout:
+                    raise TimeoutError()
 
 
 class PPComm(object):
